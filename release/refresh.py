@@ -23,6 +23,7 @@ for _s in ("stdout", "stderr"):
 
 REPO = "Tambacy/xk"
 TAG = "v0.2.0"
+NAME = "v0.2.0 二次验证流程修复与抢课校验"
 ROOT = Path(r"E:\Test_Project")
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
@@ -82,11 +83,12 @@ def main():
         r = rel.json()
         rid = r["id"]
 
-        # 顺便刷新说明
+        # 顺便刷新标题与说明（原标题是开发期口吻，改成中性的）
+        payload = {"name": NAME}
         if NOTES.exists():
-            body = NOTES.read_text(encoding="utf-8")
-            pr = c.patch(f"{api}/releases/{rid}", json={"body": body})
-            print(f"  {'✅' if pr.status_code == 200 else '⚠️ '} 说明已更新（{pr.status_code}）")
+            payload["body"] = NOTES.read_text(encoding="utf-8")
+        pr = c.patch(f"{api}/releases/{rid}", json=payload)
+        print(f"  {'✅' if pr.status_code == 200 else '⚠️ '} 标题与说明已更新（{pr.status_code}）")
 
         # 删掉同名旧资产
         want = {p.name for p in ASSETS}
