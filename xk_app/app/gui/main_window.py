@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         self.page_login.set_config(self.cfg)
         self.page_courses.set_headless(self.cfg.headless)
         if self.cfg.user:
-            self.lb_user.setText(f"学号 {self.cfg.user}")
+            self._set_user_label(self.cfg.user)
         self.goto(0)
 
         # 已经有保存的凭据就自动填上
@@ -131,14 +131,28 @@ class MainWindow(QMainWindow):
             self.page_confirm.refresh(self.cfg, self.entries)
 
     # ------------------------------------------------------------------
+    def _set_user_label(self, user: str):
+        """右上角只显示打码后的学号（202****06）。
+
+        学号属于个人信息，截图、录屏、直播时不该整串露出来；
+        启动时（读本地配置）和登录后走同一个格式，避免两处不一致。
+        """
+        user = (user or "").strip()
+        if not user:
+            self.lb_user.setText("")
+        elif len(user) > 5:
+            self.lb_user.setText(f"学号 {user[:3]}****{user[-2:]}")
+        else:
+            self.lb_user.setText(f"学号 {user}")
+
+    # ------------------------------------------------------------------
     def on_login(self, user, pwd, remember, trust):
         self.cfg.user = user
         self.cfg.remember_password = remember
         self.cfg.single_login = trust
         # 密码和学号都登记进脱敏表：日志、诊断包里永远不会出现原值
         redactor.add(pwd, user)
-        self.lb_user.setText(f"学号 {user[:3]}****{user[-2:]}" if len(user) > 5
-                             else f"学号 {user}")
+        self._set_user_label(user)
 
         # 登录动辄几十秒，必须让用户看得到在动
         self.page_login.begin_progress()
