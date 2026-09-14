@@ -1,10 +1,11 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """五个页面：登录 → 模式 → 预定课程 → 确认 → 监控。"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
 from PySide6.QtCore import Qt, Signal, QDateTime, QTimer
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QCheckBox, QComboBox, QListWidget,
                                QListWidgetItem, QScrollArea, QFrame, QMessageBox,
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
 
 from .theme import C
 from .widgets import Card, CourseCard, ModeCard, StatBox, Dot, clear_layout
-from ..browser import COURSE_KINDS
+from ..browser import COURSE_KINDS, HUMAN_RESEND, HUMAN_VISIBLE
 from ..config import CourseEntry
 
 
@@ -41,9 +42,16 @@ class LoginPage(QWidget):
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
+        # 卡片里除了表单还有登录进度和「需要你本人操作」提示块，内容高度会变。
+        # 直接放在页面布局里的话，窗口一矮 Qt 就会把这些标签压扁成一条线
+        # （字叠在一起）。所以套一层滚动区：放不下就滚动，绝不变形。
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(48, 36, 48, 36)
-        outer.addStretch(1)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(48, 36, 48, 36)
+        lay.addStretch(1)
 
         row = QHBoxLayout()
         row.addStretch(1)
@@ -69,8 +77,13 @@ class LoginPage(QWidget):
         self.cb_remember.setChecked(True)
         card.body.addWidget(self.cb_remember)
 
-        self.cb_trust = QCheckBox("信任此浏览器（会话过期后免密码重登）")
+        self.cb_trust = QCheckBox("信任此浏览器（接下来的登录免输账号密码）")
         self.cb_trust.setChecked(True)
+        self.cb_trust.setToolTip(
+            "学校原话：「本次登录使用信任浏览器访问校内其他系统时不必再输入\n"
+            "账号密码（统一登录）」。\n\n"
+            "注意：这**不等于**免验证码。要不要把本机登记为「信任设备」\n"
+            "（180 天内免验证码）是登录时单独问你的，那一步在登录页上。")
         card.body.addWidget(self.cb_trust)
 
         card.body.addSpacing(10)
@@ -106,11 +119,72 @@ class LoginPage(QWidget):
         self.bar.setFixedHeight(6)
         pb.addWidget(self.bar)
         self.lb_prog_tip = QLabel("登录通常 10~40 秒。请勿关闭程序；"
-                                 "若弹出浏览器窗口要求二次验证，请在那里完成。")
+                                 "如果需要验证码，会直接显示在这个窗口里。")
         self.lb_prog_tip.setObjectName("Faint")
         self.lb_prog_tip.setWordWrap(True)
         pb.addWidget(self.lb_prog_tip)
         card.body.addWidget(self.progress_box)
+
+        # ---- 「需要你本人操作」提示块 ----
+        # 图形验证码和二次验证都由这里完成，**不打开浏览器窗口** ——
+        # 全程只有一个窗口。验证码图片会直接显示在这块里。
+        self.human_box = QFrame()
+        self.human_box.setObjectName("HumanBox")
+        self.human_box.setVisible(False)
+        hb = QVBoxLayout(self.human_box)
+        hb.setContentsMargins(12, 10, 12, 10)
+        hb.setSpacing(6)
+        self.lb_human_title = QLabel("👤 需要你本人验证")
+        self.lb_human_title.setStyleSheet(
+            f"color:{C['warn']};font-weight:700;font-size:13.5px;")
+        hb.addWidget(self.lb_human_title)
+        self.lb_human = QLabel("")
+        self.lb_human.setWordWrap(True)
+        hb.addWidget(self.lb_human)
+
+        # 图形验证码：直接把图片显示在这里
+        self.lb_captcha = QLabel()
+        self.lb_captcha.setAlignment(Qt.AlignLeft)
+        self.lb_captcha.setVisible(False)
+        hb.addWidget(self.lb_captcha)
+
+        row_h = QHBoxLayout()
+        self.ed_code = QLineEdit()
+        self.ed_code.setPlaceholderText("在这里输入验证码")
+        self.ed_code.returnPressed.connect(self._submit_code)
+        row_h.addWidget(self.ed_code, 1)
+        self.btn_code = QPushButton("确定")
+        self.btn_code.setObjectName("Primary")
+        self.btn_code.clicked.connect(self._submit_code)
+        row_h.addWidget(self.btn_code)
+        hb.addLayout(row_h)
+
+        # 需要用户在几个选项里挑一个时（例如验证码发到手机还是发到微信），
+        # 这里会动态长出一排按钮
+        self.choice_row = QHBoxLayout()
+        hb.addLayout(self.choice_row)
+
+        row_h2 = QHBoxLayout()
+        self.btn_resend = QPushButton("重新发送验证码")
+        self.btn_resend.setObjectName("Ghost")
+        self.btn_resend.clicked.connect(
+            lambda: self._answer(HUMAN_RESEND))
+        row_h2.addWidget(self.btn_resend)
+        self.btn_use_window = QPushButton("改用浏览器窗口完成")
+        self.btn_use_window.setObjectName("Ghost")
+        self.btn_use_window.setToolTip(
+            "程序认不出这个验证页面时才需要。会打开一个浏览器窗口让你在里面操作。")
+        self.btn_use_window.clicked.connect(
+            lambda: self._answer(HUMAN_VISIBLE))
+        row_h2.addWidget(self.btn_use_window)
+        row_h2.addStretch(1)
+        self.btn_cancel_login = QPushButton("取消登录")
+        self.btn_cancel_login.setObjectName("Ghost")
+        self.btn_cancel_login.clicked.connect(self._cancel_code)
+        row_h2.addWidget(self.btn_cancel_login)
+        hb.addLayout(row_h2)
+
+        card.body.addWidget(self.human_box)
 
         card.body.addSpacing(2)
         tip = QLabel("账号密码只加密保存在本机（Windows DPAPI），换用户或换电脑都解不开；"
@@ -126,8 +200,15 @@ class LoginPage(QWidget):
 
         row.addWidget(card)
         row.addStretch(1)
-        outer.addLayout(row)
-        outer.addStretch(1)
+        lay.addLayout(row)
+        lay.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
     @staticmethod
     def _lab(t):
@@ -160,6 +241,7 @@ class LoginPage(QWidget):
     # ---- 登录进度 ----
     def begin_progress(self):
         self.progress_box.setVisible(True)
+        self.hide_human()
         self.lb_prog_step.setText("正在准备…")
         self.set_elapsed(0)
 
@@ -167,11 +249,94 @@ class LoginPage(QWidget):
         self.progress_box.setVisible(True)
         self.lb_prog_step.setText(text)
 
+    def set_human(self, text: str):
+        """需要你本人操作时的说明（用于「改用浏览器窗口」那种情况）。"""
+        self.progress_box.setVisible(True)
+        self.lb_prog_step.setText(text)
+        self.lb_human.setText(text)
+        self.ed_code.setVisible(False)
+        self.btn_code.setVisible(False)
+        self.btn_resend.setVisible(False)
+        self.lb_captcha.setVisible(False)
+        self.human_box.setVisible(True)
+
+    def show_prompt(self, prompt):
+        """在工作线程发来一次人工输入请求时显示输入区。
+
+        prompt 是 core.HumanPrompt（这里只 duck-typing 用它，不 import，
+        免得界面层和线程层互相依赖）。
+        """
+        self.progress_box.setVisible(True)
+        self.lb_prog_step.setText("等待你输入验证码…")
+        self.lb_human.setText(prompt.message)
+        self._prompt = prompt
+
+        img = getattr(prompt, "image", None)
+        if img:
+            pix = QPixmap()
+            if pix.loadFromData(img):
+                self.lb_captcha.setPixmap(pix)
+                self.lb_captcha.setVisible(True)
+            else:
+                self.lb_captcha.setVisible(False)
+        else:
+            self.lb_captcha.setVisible(False)
+
+        # 「要不要开浏览器窗口」这种纯选择题里不显示输入框
+        allow_code = bool(getattr(prompt, "allow_code", True))
+        self.ed_code.clear()
+        self.ed_code.setVisible(allow_code)
+        self.btn_code.setVisible(allow_code)
+        self.btn_resend.setVisible(bool(getattr(prompt, "allow_resend", False)))
+        self.btn_use_window.setVisible(bool(getattr(prompt, "allow_visible", False)))
+        self.btn_cancel_login.setVisible(True)
+
+        # 选项按钮（例如"验证码发到手机 / 发到微信"）
+        clear_layout(self.choice_row, keep_tail=0)
+        for ch in (getattr(prompt, "choices", None) or []):
+            b = QPushButton(str(ch.get("label", "?")))
+            b.setObjectName("Primary")
+            b.setCursor(Qt.PointingHandCursor)
+            val = str(ch.get("value", ""))
+            b.clicked.connect(lambda _=False, v=val: self._answer(v))
+            self.choice_row.addWidget(b)
+        self.choice_row.addStretch(1)
+
+        self.human_box.setVisible(True)
+        if allow_code:
+            self.ed_code.setFocus()
+        elif (getattr(prompt, "choices", None) or []):
+            pass                       # 让用户自己点选项
+        else:
+            self.btn_use_window.setFocus()
+
+    def _answer(self, value: str):
+        p = getattr(self, "_prompt", None)
+        if p is not None:
+            p.submit(value)
+
+    def _submit_code(self):
+        code = self.ed_code.text().strip()
+        if not code:
+            return
+        self.ed_code.clear()
+        self._answer(code)
+
+    def _cancel_code(self):
+        p = getattr(self, "_prompt", None)
+        if p is not None:
+            p.cancel()
+
+    def hide_human(self):
+        self._prompt = None
+        self.human_box.setVisible(False)
+
     def set_elapsed(self, seconds: float):
         self.lb_prog_time.setText(f"{seconds:.0f}s")
 
     def end_progress(self):
         self.progress_box.setVisible(False)
+        self.hide_human()
 
     def on_done(self, ok, msg):
         self.btn.setEnabled(True)
@@ -243,6 +408,7 @@ class ModePage(QWidget):
 class CoursesPage(QWidget):
     validate = Signal(int, object, object)     # index, entry, selected_snapshot
     reload_selected = Signal()
+    drop_requested = Signal(object)            # 用户点了已选课程右边的「要退」
     add_course = Signal(object)
     remove_course = Signal(int)
     back = Signal()
@@ -380,6 +546,21 @@ class CoursesPage(QWidget):
         self.cb_night.setChecked(True)
         s.addWidget(self.cb_night)
 
+        # 这个开关以前根本不存在 —— 可二次认证的报错却让用户「到运行设置里改成
+        # 可见窗口」，用户照着做会发现没这个选项。补上，并且默认勾选。
+        self.cb_headed = QCheckBox("显示浏览器窗口（推荐）")
+        self.cb_headed.setChecked(True)
+        self.cb_headed.setToolTip(
+            "勾上：浏览器窗口可见，伪装度最高；遇到验证码或二次验证时你可以直接操作。\n"
+            "取消：浏览器在后台跑，桌面更清爽。需要你验证时它仍会自动弹出来。\n\n"
+            "两种模式下，窗口都可以随时关掉——程序会自动转到后台继续，不会中断。")
+        s.addWidget(self.cb_headed)
+        lb_headed = QLabel("窗口可以随时关掉，程序会自动在后台重开，不会中断；"
+                           "只有需要你输验证码时才会弹出来。不想让它平时占着桌面就取消勾选。")
+        lb_headed.setObjectName("Faint")
+        lb_headed.setWordWrap(True)
+        s.addWidget(lb_headed)
+
         self.cb_dry = QCheckBox("试运行（只监听、不真的提交）")
         s.addWidget(self.cb_dry)
 
@@ -419,7 +600,37 @@ class CoursesPage(QWidget):
         self.list_lay.setSpacing(10)
         self.list_lay.addStretch(1)
         self.scroll.setWidget(self.list_host)
-        right.addWidget(self.scroll, 1)
+        right.addWidget(self.scroll, 3)
+
+        # ---------- 右：本学期已选课程（从教务系统读回来，不用学生自己去查） ----------
+        # 模式二要选「让位」的课，这里直接点「要退」就行，不用去选课系统里翻。
+        sel_head = QHBoxLayout()
+        t2 = QLabel("本学期已选课程")
+        t2.setObjectName("CardTitle")
+        sel_head.addWidget(t2)
+        self.lb_sel_count = QLabel("未读取")
+        self.lb_sel_count.setObjectName("Hint")
+        sel_head.addWidget(self.lb_sel_count)
+        sel_head.addStretch(1)
+        self.btn_sel_reload = QPushButton("刷新")
+        self.btn_sel_reload.setObjectName("Ghost")
+        self.btn_sel_reload.setCursor(Qt.PointingHandCursor)
+        self.btn_sel_reload.clicked.connect(self.reload_selected.emit)
+        sel_head.addWidget(self.btn_sel_reload)
+        right.addLayout(sel_head)
+
+        self.sel_scroll = QScrollArea()
+        self.sel_scroll.setWidgetResizable(True)
+        self.sel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.sel_scroll.setFrameShape(QFrame.NoFrame)
+        self.sel_scroll.setMinimumHeight(130)
+        sel_host = QWidget()
+        self.sel_lay = QVBoxLayout(sel_host)
+        self.sel_lay.setContentsMargins(2, 2, 12, 2)
+        self.sel_lay.setSpacing(6)
+        self.sel_lay.addStretch(1)
+        self.sel_scroll.setWidget(sel_host)
+        right.addWidget(self.sel_scroll, 2)
 
         self.lb_summary = QLabel("")
         self.lb_summary.setWordWrap(True)
@@ -439,6 +650,15 @@ class CoursesPage(QWidget):
 
         root.addWidget(right_host, 6)
 
+    def headless(self) -> bool:
+        """「后台无窗口」= 没勾「显示浏览器窗口」。"""
+        return not self.cb_headed.isChecked()
+
+    def set_headless(self, headless: bool):
+        self.cb_headed.blockSignals(True)
+        self.cb_headed.setChecked(not headless)
+        self.cb_headed.blockSignals(False)
+
     # ------------------------------------------------------------------
     def _on_action_changed(self, i):
         self.lb_action.setText("我要退掉这门课" if i == 1 else "我要抢这门课")
@@ -453,8 +673,9 @@ class CoursesPage(QWidget):
             time_text=self.ed_time.text().strip(),
             kch=self.ed_kch.text().strip(),
             kxh=self.ed_kxh.text().strip())
-        if e.is_empty() if hasattr(e, "is_empty") else not any(
-                [e.name, e.kch, e.kxh, e.teacher, e.time_text]):
+        # 注意：CourseEntry 没有 is_empty()（那是 CourseQuery 的），
+        # 以前这里写成一个永远走 else 的三元表达式，纯属误导，直接展开。
+        if not any([e.name, e.kch, e.kxh, e.teacher, e.time_text]):
             QMessageBox.information(self, "信息不足",
                                     "至少填一个能定位课程的信息（课程名或课程号最稳妥）。")
             return
@@ -551,11 +772,54 @@ class CoursesPage(QWidget):
         self._refresh_summary()
 
     def set_selected_snapshot(self, rows):
+        """把从教务系统读回来的「本学期已选课程」显示出来。
+
+        以前这里只更新一句"已读取 N 门"的提示，列表本身从来不显示 ——
+        学生想知道自己选了什么，还得回选课系统里翻。现在直接列出来，
+        每门右边一个「要退」，点一下就加进「要退的课」清单（模式二让位用）。
+        """
         self.selected_snapshot = rows or []
         n = len(self.selected_snapshot)
+        self.lb_sel_count.setText(f"{n} 门" if n else "没读到")
+        clear_layout(self.sel_lay, keep_tail=1)
+        if not self.selected_snapshot:
+            lb = QLabel("还没读到已选课程。点上面的「刷新」从教务系统读一次。")
+            lb.setObjectName("Faint")
+            lb.setWordWrap(True)
+            self.sel_lay.insertWidget(self.sel_lay.count() - 1, lb)
+        else:
+            for c in self.selected_snapshot:
+                self.sel_lay.insertWidget(self.sel_lay.count() - 1, self._sel_row(c))
         self.lb_hint.setText(
-            f"已读取你这学期 {n} 门已选课程。"
+            f"已读取你这学期 {n} 门已选课程；要哪门让位，直接点它右边的「要退」。"
             "提示：同名课程有多个课堂时，请补上课序号或上课时间。")
+
+    def _sel_row(self, c):
+        """已选课程列表里的一行：[类别] 课程号-课序号 课程名 时间 教师  [要退]"""
+        f = QFrame()
+        f.setObjectName("CardFlat")
+        lay = QHBoxLayout(f)
+        lay.setContentsMargins(10, 7, 10, 7)
+        lay.setSpacing(8)
+        kind = (getattr(c, "kind", "") or "—").strip() or "—"
+        bits = [f"<b>{getattr(c, 'name', '')}</b>",
+                f"<span style='color:{C['text_dim']}'>［{kind}］"
+                f"{getattr(c, 'kch', '')}-{getattr(c, 'kxh', '')}　"
+                f"{getattr(c, 'time_text', '')}"]
+        teacher = getattr(c, "teacher", "")
+        if teacher:
+            bits.append(f"　{teacher}")
+        bits.append("</span>")
+        lb = QLabel("".join(bits))
+        lb.setWordWrap(True)
+        lay.addWidget(lb, 1)
+        b = QPushButton("要退")
+        b.setObjectName("Ghost")
+        b.setCursor(Qt.PointingHandCursor)
+        b.setToolTip("把这门课加进「要退的课」清单（模式二让它让位）")
+        b.clicked.connect(lambda _=False, cc=c: self.drop_requested.emit(cc))
+        lay.addWidget(b)
+        return f
 
 
 # ==========================================================================

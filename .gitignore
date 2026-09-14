@@ -119,3 +119,6 @@ monitor.pid
 login_diag.png
 sm2js.txt
 *.pid
+
+# 联调/诊断过程留下的页面快照与日志（留着排查用，但不进仓库）
+_diag/

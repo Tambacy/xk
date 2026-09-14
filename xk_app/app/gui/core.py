@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 界面与浏览器之间的桥
 ====================
@@ -29,17 +29,68 @@ from ..scheduler import Scheduler
 log = get_logger("gui.core")
 
 
+class HumanPrompt:
+    """工作线程向界面要一次人工输入（验证码），并等界面给结果。
+
+    为什么需要它：Playwright 的调用必须待在工作线程里，而要验证码又必须问
+    界面 —— 于是工作线程在这里**阻塞等**，界面线程异步填结果。
+    取消 / 超时都能把工作线程放出来，所以程序随时关得掉。
+    """
+
+    def __init__(self, message: str, *, image: bytes | None = None,
+                 allow_resend: bool = False, allow_visible: bool = False,
+                 allow_code: bool = True, choices: list | None = None,
+                 timeout: float = 300.0):
+        self.message = message
+        self.image = image
+        self.allow_resend = allow_resend
+        self.allow_visible = allow_visible
+        self.allow_code = allow_code
+        # 让用户从几个选项里挑一个（例如"验证码发到手机 / 发到微信"）。
+        # 每项 {"label": 显示文字, "value": 交回给工作线程的值}
+        self.choices = list(choices or [])
+        self.timeout = float(timeout)
+        self._ev = threading.Event()
+        self._value: str | None = None
+        self.cancelled = False
+
+    def submit(self, value: str):
+        self._value = value
+        self._ev.set()
+
+    def cancel(self):
+        self.cancelled = True
+        self._ev.set()
+
+    def wait(self) -> str | None:
+        if not self._ev.wait(self.timeout + 5):
+            self.cancelled = True
+            return None
+        return None if self.cancelled else self._value
+
+
 class BrowserCore(QThread):
     """常驻工作线程：持有浏览器，串行执行界面派来的任务。"""
 
     logged_in = Signal(bool, str)        # (成功?, 说明)
     login_progress = Signal(str)         # 登录过程中的阶段提示
+    login_human = Signal(str)            # 需要你本人操作（图形验证码 / 二次验证）
+    human_input = Signal(object)         # HumanPrompt：要一次人工输入并等结果
     log_line = Signal(str, str)          # (文本, 级别)
     status_changed = Signal(dict)
     validated = Signal(int, dict)        # (课程下标, 校验结果)
     selected_loaded = Signal(object)     # 已选课程快照 list[SelectedCourse]
     semesters_loaded = Signal(str, object)   # (当前学期, [(值, 显示名), …])
     finished = Signal(str)
+
+    # 这些失败重试没有意义，有些还会让情况变糟：连续提交登录正是统一身份认证
+    # 判定「可疑」并把要求升级（直接登录 → 图形验证码 → 短信二次认证）的原因。
+    NO_RETRY = ("验证码", "二次认证", "二次验证", "票据校验失败", "sso_fail",
+                "密码", "用户名", "取消")
+
+    @classmethod
+    def _retryable(cls, msg: str) -> bool:
+        return not any(k in (msg or "") for k in cls.NO_RETRY)
 
     def __init__(self, cfg: AppConfig, paths: Paths, parent=None):
         super().__init__(parent)
@@ -51,6 +102,31 @@ class BrowserCore(QThread):
         self._jobs: "queue.Queue[tuple]" = queue.Queue()
         self._running = True
         self._login_ok = False
+        self._prompt: HumanPrompt | None = None
+
+    # ------------------------------------------------------------------
+    def _ask_human_code(self, message: str, *, image=None, allow_resend=False,
+                        allow_visible=False, allow_code=True, choices=None,
+                        timeout=300.0):
+        """工作线程里调用：把问题抛给界面，然后**阻塞等**结果。
+
+        阻塞期间仍然可以被打断（取消 / 关程序），见 cancel_prompt()。
+        """
+        p = HumanPrompt(message, image=image, allow_resend=allow_resend,
+                        allow_visible=allow_visible, allow_code=allow_code,
+                        choices=choices, timeout=timeout)
+        self._prompt = p
+        self.human_input.emit(p)
+        try:
+            return p.wait()
+        finally:
+            self._prompt = None
+
+    def cancel_prompt(self):
+        """取消正在等待的人工输入（用户点了取消，或要关程序）。"""
+        p = self._prompt
+        if p is not None:
+            p.cancel()
 
     # ------------------------------------------------------------------
     def say(self, msg: str, level: str = "INFO"):
@@ -69,6 +145,11 @@ class BrowserCore(QThread):
     def do_start(self):
         self._jobs.put(("start", None))
 
+    def do_set_headless(self, headless: bool):
+        """切「可见窗口 / 后台无窗口」。浏览器已经起来了就当场重建。"""
+        self.cfg.headless = bool(headless)
+        self._jobs.put(("headless", bool(headless)))
+
     def request_selected(self):
         """请工作线程读一次已选课程。"""
         self._jobs.put(("selected", None))
@@ -76,12 +157,16 @@ class BrowserCore(QThread):
     def do_stop(self):
         if self.scheduler:
             self.scheduler.stop("界面请求停止")
+        self.cancel_prompt()
         self._jobs.put(("nop", None))
 
     def shutdown(self):
         self._running = False
         if self.scheduler:
             self.scheduler.stop("程序退出")
+        # 关键：如果正卡在"等你输验证码"上，先把它取消掉，
+        # 否则工作线程不会退出，关程序时就会卡住。
+        self.cancel_prompt()
         self._jobs.put(("quit", None))
 
     # ------------------------------------------------------------------
@@ -113,6 +198,8 @@ class BrowserCore(QThread):
                     self._handle_validate(*payload)
                 elif job == "start":
                     self._handle_start()
+                elif job == "headless":
+                    self._handle_set_headless(payload)
                 elif job == "quit":
                     break
             except Exception as e:
@@ -133,25 +220,31 @@ class BrowserCore(QThread):
             try:
                 self.browser.login(self.cfg.user, self.password,
                                    single_login=self.cfg.single_login,
-                                   on_progress=lambda s: self.login_progress.emit(s))
+                                   on_progress=lambda s: self.login_progress.emit(s),
+                                   on_human=lambda s: self.login_human.emit(s),
+                                   ask_human_code=self._ask_human_code)
                 ok, msg = True, "登录成功"
                 break
             except NeedSecondFactor as e:
-                # 需要真人完成二次验证，重试也没用，直接告诉用户怎么办
+                # 需要真人完成二次验证，重试也没用，直接告诉用户怎么做
                 msg = str(e)
                 self.say(msg, "ERROR")
                 break
             except PageError as e:
                 msg = str(e)
                 self.say(f"登录失败（第 {attempt} 次）：{msg}", "ERROR")
-                if "密码" in msg or "用户名" in msg:
+                if not self._retryable(msg):
+                    self.say("这种失败重试没有意义（而且连续登录会被判为异常），"
+                             "已停止重试。", "WARN")
                     break
-                time.sleep(min(12, 5 * attempt))
+                time.sleep(min(15, 8 * attempt))
             except Exception as e:
                 msg = f"{type(e).__name__}: {e}"
                 log.error("登录异常", exc_info=True)
                 self.say(f"登录异常（第 {attempt} 次）：{msg}", "ERROR")
-                time.sleep(min(12, 5 * attempt))
+                if not self._retryable(msg):
+                    break
+                time.sleep(min(15, 8 * attempt))
         self._login_ok = ok
         if ok:
             self.say("登录成功，会话已就绪。")
@@ -166,6 +259,22 @@ class BrowserCore(QThread):
             except Exception as e:
                 self.say(f"读取学期失败：{e}", "WARN")
         self.logged_in.emit(ok, msg)
+
+    def _handle_set_headless(self, headless: bool):
+        """切换有头/无头。profile 目录不动，所以「信任此设备」状态不会丢。"""
+        self.cfg.headless = bool(headless)
+        if self.browser is None:
+            return
+        self.browser.set_preference(bool(headless))
+        if self.browser.headless == bool(headless):
+            return
+        try:
+            self.browser.restart(headless=bool(headless))
+            self.say(f"浏览器已切换为"
+                     f"{'后台无窗口' if headless else '可见窗口'}。")
+        except Exception as e:
+            log.error("切换浏览器模式失败", exc_info=True)
+            self.say(f"切换浏览器模式失败：{e}", "ERROR")
 
     def _handle_validate(self, index: int, entry: CourseEntry, selected: list):
         result = {"index": index, "ok": False, "reason": "", "rows": [],
@@ -227,6 +336,12 @@ class BrowserCore(QThread):
             entry.resolved_teacher = row.teacher
             entry.resolved_kyl = row.kyl
             entry.resolved_cid = row.cid or f"{self.cfg.xnxq};{row.kch};{row.kxh};"
+            # 把课程号/课序号回填到条目上。运行时靠它确认「拿回来的就是这门课」——
+            # 学生可能只填了课程名，没有课程号就守不住「别选错课」那道门。
+            if not entry.kch:
+                entry.kch = row.kch
+            if not entry.kxh:
+                entry.kxh = row.kxh
 
             # 时间冲突：与已选课程比
             conflicts = find_conflicts(row.time_text,

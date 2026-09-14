@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """验证凭据加密存储与日志脱敏（不联网、不碰真实账号）。"""
 import logging
 import shutil
@@ -26,7 +26,26 @@ def check(label, got, want=True):
     print(f"{'PASS' if ok else 'FAIL'}  {label}   实际={got!r}" + ("" if ok else f"  期望={want!r}"))
 
 
-tmp = Path(tempfile.mkdtemp(prefix="xk_test_"))
+def _scratch_dir() -> Path:
+    """找一个真的能写的临时目录。
+
+    系统临时目录不是总能写：某些受限/沙箱环境里 `tempfile.mkdtemp()` 建出来的
+    目录会带上只给创建者、连自己都进不去的 ACL，测试会在第一步就假失败。
+    所以建完先探一下可写性，不行就退到项目自己的 data/ 下。
+    """
+    try:
+        d = Path(tempfile.mkdtemp(prefix="xk_test_"))
+        probe = d / ".probe"
+        probe.write_bytes(b"x")
+        probe.unlink()
+        return d
+    except Exception:
+        d = Path(__file__).parent / "data" / "sectest"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+
+tmp = _scratch_dir()
 print("=" * 70)
 print("【1】DPAPI 加解密")
 print("=" * 70)

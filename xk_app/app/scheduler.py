@@ -93,6 +93,13 @@ SELECT_PHASES = ("正选", "补退选", "补选退", "选课调整")
 LOTTERY_PHASES = ("报名", "预选", "抽签")
 NEVER_PHASES = ("未开始", "已结束", "不是选课", "不能选课")
 
+# 服务端的「硬拒绝」：重试多少次结果都一样，而且重试只会拖时间、
+# 甚至触发防刷（连续提交会被判「请输入正确的验证码」）。
+HARD_FAIL_MARKERS = (
+    "选课阶段", "不能选课", "只能选一门", "不能提交",
+    "不存在", "没有余量", "已满", "验证码", "不允许", "未开放",
+)
+
 
 def phase_allows_select(text: str) -> bool | None:
     """根据「当前选课阶段」文本判断现在能不能先到先得地选课。
@@ -326,6 +333,7 @@ class Scheduler:
         while not self._stop.is_set():
             if not self._night_ok():
                 continue
+            t_round = time.time()
             text = self._peek_phase()
             allow = phase_allows_select(text)
             t_start, t_end = phase_time_range(text)
@@ -349,8 +357,12 @@ class Scheduler:
                     return
                 self.status.message = f"阶段信息不明确：{text}"
             self._push()
-            self.status.next_poll_in = rhythm.next()
-            if not self._sleep(self.status.next_poll_in):
+            # 按周期结算：把这一轮本身耗掉的时间扣掉，否则真实间隔会被
+            # 请求耗时越拖越长（humanize.py 里写明的第三条原则）
+            period = rhythm.next()
+            remain = max(0.0, period - (time.time() - t_round))
+            self.status.next_poll_in = remain
+            if not self._sleep(remain):
                 return
 
     def _peek_phase(self) -> str:
@@ -395,6 +407,7 @@ class Scheduler:
                 return self._finish_stopped()
 
             period = rhythm.next()
+            t_round = time.time()
             self.status.state = State.MONITORING.value
             ok = self._poll_once(grabs, quiet=True)
             if ok:
@@ -417,8 +430,11 @@ class Scheduler:
                 log.info("监听中：已轮询 %d 次，状态 %s", self.status.polls,
                          "; ".join(f"{c['label']} 课余量{c['kyl']}" for c in
                                    (self.status.courses or [])))
-            self.status.next_poll_in = period
-            if not self._sleep(period):
+            # 按周期结算：扣掉本轮轮询耗掉的时间。非体育课要走页面搜索，
+            # 一轮可能好几秒，不扣的话真实间隔会明显长于设定值。
+            remain = max(0.0, period - (time.time() - t_round))
+            self.status.next_poll_in = remain
+            if not self._sleep(remain):
                 return
 
     # ==================================================================
@@ -464,16 +480,81 @@ class Scheduler:
         self.status.courses = snapshot
         return bool(done_flags) and all(done_flags)
 
-    def _read_target(self, entry: CourseEntry):
-        """读目标课当前状况，返回 (命中的行, 该课程号下所有行)。"""
+    def _read_rows(self, entry: CourseEntry) -> list:
+        """读一门课的候选行。
+
+        **策略是实测出来的**（2026-09-14 对着真实页面量过）：
+
+          * 体育课：URL 带 p_kch 会把 gridData 直接筛成目标课那几行 ——
+            快路径，0.34 秒，实测有效，照用。
+          * 必修 / 限选 / 任选：URL 参数**无效**，但页面会返回「默认候选列表」。
+            实测必修课的默认列表里就有目标课的 4 个课堂，所以正解是
+            **先读默认列表、在里面找目标课**。
+          * 默认列表里真的没有时，再走页面搜索框（实测任选课的搜索框有效）。
+          * 那个「查询」按钮的 onclick 在必修页是 filter()、体育页是 doQuery()，
+            有的页面上压根没定义 —— 点了毫无反应，所以不能只依赖它。
+
+        以前写的是「非体育课一律走搜索框」，结果必修课拿回来的是没筛过的
+        14 行无关课程。现在改成列表优先、搜索兜底。
+        """
         browser = self.browser
-        rows = browser.read_capacity_rows(entry.kind, kch=entry.kch)
+        if entry.kind == "ty" and entry.kch:
+            return browser.read_capacity_rows("ty", kch=entry.kch)
+
+        want = self._want_kch(entry)
+        rows = browser.read_capacity_rows(entry.kind)
+        if not want or any(r.kch == want for r in rows):
+            return rows
+
+        keyword = entry.kch or entry.name
+        if not keyword:
+            return rows
+        # 先按课程号搜，不行再按课程名搜 —— 实测任选课按课程名能搜到、
+        # 按课程号搜不到；多试一种能救回相当一部分课程。
+        tried = []
+        for kw, by_kch in ((entry.kch, True), (entry.name, False)):
+            if not kw or kw in tried:
+                continue
+            tried.append(kw)
+            try:
+                found = browser.search_course_human(entry.kind, kw, by_kch=by_kch)
+            except Exception as e:
+                self.say(f"搜索 {entry.label()}（{kw}）失败：{e}", "WARN")
+                continue
+            if found and (not want or any(r.kch == want for r in found)):
+                return found
+        self.say(f"默认列表和搜索里都没找到 {want or entry.label()}；"
+                 f"如果这门课确实开了，可能被分页挡在后面。", "WARN")
+        return rows
+
+    @staticmethod
+    def _want_kch(entry: CourseEntry) -> str:
+        """目标课程号：优先 entry.kch，其次从校验时回填的 resolved_cid 里取。"""
         if entry.kch:
-            rows = [r for r in rows if r.kch == entry.kch] or rows
+            return entry.kch
+        parts = (entry.resolved_cid or "").split(";")
+        return parts[1] if len(parts) >= 3 else ""
+
+    def _read_target(self, entry: CourseEntry):
+        """读目标课当前状况，返回 (命中的行, 该课程号下所有行)。
+
+        最后有一道守门：挑出来的那行**必须就是目标课程号**。课序号都是 0/1/2
+        这种小数字，一旦页面返回的是别的课，`pick_section` 很容易撞上一个
+        无关课程的 kxh —— 那就会拿着**别人的课**的 cid 去退课和提交。
+        宁可这一轮什么都不做，也绝不能改错学生的选课结果。
+        """
+        rows = self._read_rows(entry)
+        want = self._want_kch(entry)
+        if want:
+            exact = [r for r in rows if r.kch == want]
+            if exact:
+                rows = exact
+
         row = pick_section(rows, kxh=entry.kxh, time_text=entry.time_text)
-        if row is None and rows:
-            row = pick_section(rows, kxh=entry.resolved_cid.split(";")[2]
-                               if entry.resolved_cid.count(";") >= 2 else "")
+        if row is not None and want and row.kch != want:
+            self.say(f"⚠ 页面返回的是 {row.name} {row.kch}-{row.kxh}，不是目标课程 "
+                     f"{want}，本轮跳过（避免选错课）", "WARN")
+            row = None
         return row, rows
 
     def _grab(self, entry: CourseEntry, row: CapacityRow, all_rows: list) -> bool:
@@ -530,8 +611,11 @@ class Scheduler:
             if "成功" in msg:
                 ok = True
                 break
-            if "选课阶段" in msg or "不能选课" in msg:
-                ok, msg = False, msg
+            if any(k in msg for k in HARD_FAIL_MARKERS):
+                # 硬拒绝：比如「…是体育课，只能选一门,不能提交 !」。
+                # 以前只认「选课阶段」「不能选课」两个词，其余全被当成可重试，
+                # 白白重试 3 次（每次还要睡 1.5~3 秒），抢课窗口就这么流失了。
+                self.say(f"服务端明确拒绝，不再重试：{msg}", "WARN")
                 break
             pause(1.5, 3.0)
 
@@ -556,11 +640,7 @@ class Scheduler:
             self.say("尝试回滚，把退掉的课选回来…", "WARN")
             for c in dropped:
                 for _ in range(3):
-                    try:
-                        m = self.browser.submit_selection(
-                            self._kind_of(c.kind, entry.kind), c.del_id, urgent=False)
-                    except Exception as e:
-                        m = str(e)
+                    m = self._reselect(c, entry)
                     self.say(f"  回滚 {c.name}：{m}")
                     if "成功" in m:
                         break
@@ -568,11 +648,52 @@ class Scheduler:
         return False
 
     @staticmethod
-    def _kind_of(kind_text: str, fallback: str) -> str:
+    def _kind_of(kind_text: str) -> str | None:
+        """把已选列表里那个中文「属性」列还原成内部类别代号；认不出返回 None。
+
+        页面这一列有时写「必修」、有时写「必修课」，两种都要认 —— 以前只按
+        COURSE_KINDS 里的全名（「必修课」）精确比对，所以「必修」一律认不出，
+        回滚时就退化成了「目标课的类别」。
+        """
+        name = (kind_text or "").strip()
+        if not name:
+            return None
+        if name in COURSE_KINDS:                    # 已经是代号
+            return name
         for k, v in COURSE_KINDS.items():
-            if v["name"] == (kind_text or "").strip():
+            full = v["name"]
+            if name == full or name == full.rstrip("课"):
                 return k
-        return fallback
+        return None
+
+    def _reselect(self, c: SelectedCourse, entry: CourseEntry) -> str:
+        """把退掉的课选回来。
+
+        类别优先用已选列表里的那一列；那一列是页面 JS 填的，**可能为空**，
+        空的时候以前会直接退化成「目标课的类别」—— 用体育课当目标去回滚一门
+        任选课，就会跑去体育课页面找，永远找不到（等于白退一门课）。
+
+        这里改成依次尝试各个类别。这样做是安全的：`submit_selection` 在点提交
+        之前会先确认页面上真的有这个 cid，找不到就抛错，所以「试错」不可能
+        误选到别的课，只是多花几次页面加载。
+        """
+        order: list[str] = []
+        for k in ([self._kind_of(c.kind), entry.kind, "ty", "rx", "bx", "xx", "cx"]):
+            if k and k not in order:
+                order.append(k)
+        last = ""
+        for kind in order:
+            try:
+                # ⚠ 必须把课程号带上：体育课页只有带 p_kch 才会筛出目标课那几行，
+                # 不带的话打开的是「全部体育课」列表（18 页），目标课根本不在
+                # 第一页上 —— 实测就是这样导致回滚一次都成功不了。
+                last = self.browser.submit_selection(kind, c.del_id, urgent=False,
+                                                     kch=c.kch)
+            except Exception as e:
+                last = f"{type(e).__name__}: {e}"
+            if "成功" in last:
+                return last
+        return last
 
     def _victims(self, entry: CourseEntry, selected: list[SelectedCourse],
                  row: CapacityRow) -> list[SelectedCourse]:

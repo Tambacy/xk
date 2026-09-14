@@ -11,7 +11,7 @@
 
 #define AppName        "学校选课助手"
 #define AppNameEn      "THU XkHelper"
-#define AppVersion     "0.1.0"
+#define AppVersion     "0.2.0"
 #define AppPublisher   "个人自用"
 #define AppExeName     "XkHelper.exe"
 
@@ -19,7 +19,15 @@
 #define DistDir        "dist\XkHelper"
 
 ; 随包 Chromium（直接引用本机 ms-playwright 目录，不打进 PyInstaller，构建快得多）
-#define ChromiumSrc    GetEnv("LOCALAPPDATA") + "\ms-playwright\chromium-1234"
+;
+; 目录名（chromium-1234 这种）会随 Playwright 版本变化，所以不要写死：
+; build.ps1 会自动探测实际目录名并用 /DChromiumDir=… 传进来；
+; 手动调用 ISCC 时也可以自己传，例如
+;     ISCC.exe /DChromiumDir=chromium-1234 installer.iss
+#ifndef ChromiumDir
+  #define ChromiumDir "chromium-1234"
+#endif
+#define ChromiumSrc    GetEnv("LOCALAPPDATA") + "\ms-playwright\" + ChromiumDir
 
 [Setup]
 AppId={{8F3C1A62-7B4E-4D19-9C2A-5E7D6B1F0A34}
@@ -59,7 +67,7 @@ Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs cr
 Source: "docs\使用说明.html"; DestDir: "{app}"; Flags: ignoreversion
 
 ; ---- 随包 Chromium（装到 _internal\browsers，与 runtime.py 的约定一致）----
-Source: "{#ChromiumSrc}\*"; DestDir: "{app}\_internal\browsers\chromium-1234"; \
+Source: "{#ChromiumSrc}\*"; DestDir: "{app}\_internal\browsers\{#ChromiumDir}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

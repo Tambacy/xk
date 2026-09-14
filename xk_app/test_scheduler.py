@@ -96,7 +96,8 @@ print("【4】真实环境干跑模式三（约 25 秒）")
 print("=" * 74)
 
 import json
-sec = json.load(open(r"E:\Test_Project\thu_xk\secrets.json", encoding="utf-8-sig"))
+import _creds  # 凭据统一从环境变量 / DPAPI 读取
+sec = _creds.load_secrets()
 cfg.user = sec["user"]
 cfg.mode = 3
 cfg.poll_avg = 3.0

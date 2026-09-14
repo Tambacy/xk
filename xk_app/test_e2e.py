@@ -72,7 +72,8 @@ def shot(name):
     st(f"截图 e2e-{name}.png")
 
 
-sec = json.load(open(r"E:\Test_Project\thu_xk\secrets.json", encoding="utf-8-sig"))
+import _creds  # 凭据统一从环境变量 / DPAPI 读取
+sec = _creds.load_secrets()
 
 print("=" * 72)
 print("端到端联调开始")

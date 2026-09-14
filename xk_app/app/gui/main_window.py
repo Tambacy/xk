@@ -18,6 +18,7 @@ from .pages import LoginPage, ModePage, CoursesPage, ConfirmPage, MonitorPage
 from .theme import C, stylesheet
 from .widgets import StepBar
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
+from ..browser import COURSE_KINDS
 from ..secretstore import SecretStore, redactor
 from ..logging_setup import setup_logging, get_logger, export_diagnostics
 
@@ -84,6 +85,7 @@ class MainWindow(QMainWindow):
 
         self._wire()
         self.page_login.set_config(self.cfg)
+        self.page_courses.set_headless(self.cfg.headless)
         if self.cfg.user:
             self.lb_user.setText(f"学号 {self.cfg.user}")
         self.goto(0)
@@ -108,6 +110,8 @@ class MainWindow(QMainWindow):
         self.page_courses.remove_course.connect(self.on_remove_course)
         self.page_courses.validate.connect(self.on_validate)
         self.page_courses.reload_selected.connect(self.on_reload_selected)
+        self.page_courses.drop_requested.connect(self.on_drop_requested)
+        self.page_courses.cb_headed.toggled.connect(self.on_headless_toggled)
         self.page_courses.back.connect(lambda: self.goto(1))
         self.page_courses.next.connect(lambda: self.goto(3))
         self.page_confirm.back.connect(lambda: self.goto(2))
@@ -121,6 +125,7 @@ class MainWindow(QMainWindow):
         self.steps.set_current(index)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
+            self.page_courses.set_headless(self.cfg.headless)
             self.page_courses.set_entries(self.entries, self.results)
         if index == 3:
             self.page_confirm.refresh(self.cfg, self.entries)
@@ -147,6 +152,8 @@ class MainWindow(QMainWindow):
             self.core = BrowserCore(self.cfg, self.paths)
             self.core.logged_in.connect(self.on_logged_in)
             self.core.login_progress.connect(self.on_login_progress)
+            self.core.login_human.connect(self.on_login_human)
+            self.core.human_input.connect(self.on_human_input)
             self.core.log_line.connect(self.page_monitor.append_log)
             self.core.status_changed.connect(self.page_monitor.update_status)
             self.core.validated.connect(self.on_validated)
@@ -158,6 +165,26 @@ class MainWindow(QMainWindow):
 
     def on_login_progress(self, text: str):
         self.page_login.set_progress(text)
+
+    def on_login_human(self, text: str):
+        """需要你本人操作：界面高亮显示该做什么。"""
+        self.page_login.set_human(text)
+
+    def on_human_input(self, prompt):
+        """工作线程要一次人工输入（验证码）—— 显示在**主窗口**里，不开新窗口。"""
+        self.goto(0)                        # 保证用户看得见输入框
+        self.page_login.show_prompt(prompt)
+        log.info("等待用户输入验证码（可重发=%s 可改用窗口=%s）",
+                 getattr(prompt, "allow_resend", False),
+                 getattr(prompt, "allow_visible", False))
+
+    def on_headless_toggled(self, headed: bool):
+        headless = not headed
+        self.cfg.headless = headless
+        self.save_config()
+        if self.core:
+            self.core.do_set_headless(headless)
+        log.info("浏览器模式切换为：%s", "后台无窗口" if headless else "可见窗口")
 
     def _tick_login(self):
         t0 = getattr(self, "_login_t0", None)
@@ -204,6 +231,41 @@ class MainWindow(QMainWindow):
     def on_selected_loaded(self, rows):
         self.page_courses.set_selected_snapshot(rows)
 
+    @staticmethod
+    def _kind_for(kind_text: str) -> str:
+        """把页面上那列中文「属性」还原成内部类别代号（认不出就用 ty 兜底，
+        退课校验是按课程号匹配的，类别只影响去哪一页找）。"""
+        from ..browser import KIND_BY_NAME
+        name = (kind_text or "").strip()
+        if name in COURSE_KINDS:
+            return name
+        for full, code in KIND_BY_NAME.items():
+            if name == full or name == full.rstrip("课"):
+                return code
+        return "ty"
+
+    def on_drop_requested(self, c):
+        """在「本学期已选课程」里点了某门课的「要退」→ 加进要退的清单。
+
+        学生就不用自己去选课系统里翻课程号了（模式二让位最常用）。
+        """
+        for e in self.entries:
+            if (e.action == "drop" and e.kch
+                    and e.kch == getattr(c, "kch", "")
+                    and str(e.kxh or "") == str(getattr(c, "kxh", ""))):
+                QMessageBox.information(
+                    self, "已经在清单里",
+                    f"{getattr(c, 'name', '')}（{c.kch}-{c.kxh}）"
+                    f"已经在「要退的课」清单里了。")
+                return
+        entry = CourseEntry(action="drop", kind=self._kind_for(getattr(c, "kind", "")),
+                            kch=getattr(c, "kch", ""), kxh=getattr(c, "kxh", ""),
+                            name=getattr(c, "name", ""),
+                            time_text=getattr(c, "time_text", ""),
+                            teacher=getattr(c, "teacher", ""))
+        log.info("从已选课程加入要退的课：%s", entry.label())
+        self.on_add_course(entry)
+
     def on_semesters_loaded(self, current: str, options):
         self.page_courses.set_semesters(current or self.cfg.xnxq, options)
         if current:
@@ -211,20 +273,58 @@ class MainWindow(QMainWindow):
             self.save_config()
 
     def on_forget(self):
-        if QMessageBox.question(
-                self, "清除已保存的账号密码",
-                "将从本机删除已加密保存的账号密码。\n"
-                "下次打开需要重新输入（浏览器里的登录态也会一起清掉）。\n\n确定吗？"
-        ) != QMessageBox.Yes:
+        """清除本机凭据。
+
+        这里要分清两件事 —— 以前它们被合成了一个动作，代价很大：
+
+          * 删密码          —— 无害，随时可以重新输入
+          * 删浏览器身份    —— 把「信任此设备」的状态一起删了。下次登录会被学校
+                              当成一台新电脑，很可能要求短信 / 微信二次验证，
+                              而且之后每次都要验证。**这是不可逆的。**
+
+        所以默认只做第一件事，第二件事必须由用户明确选择。
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle("清除本机保存的账号密码")
+        box.setText("将删除本机加密保存的账号密码。")
+        box.setInformativeText(
+            "「仅清除密码」：只删密码，浏览器里的「信任此设备」状态保留，"
+            "下次登录通常不需要二次验证。\n\n"
+            "「连浏览器身份一起重置」：把浏览器配置目录也删掉。下次登录会被学校"
+            "当成一台新设备，很可能要求短信 / 微信二次验证，而且以后每次都要验证。"
+            "这一步不可逆。")
+        b_pwd = box.addButton("仅清除密码（推荐）", QMessageBox.AcceptRole)
+        b_all = box.addButton("连浏览器身份一起重置", QMessageBox.DestructiveRole)
+        box.addButton("取消", QMessageBox.RejectRole)
+        box.setDefaultButton(b_pwd)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is None or clicked is not b_pwd and clicked is not b_all:
             return
+        reset_profile = clicked is b_all
+
+        if reset_profile:
+            confirm = QMessageBox.warning(
+                self, "确认重置浏览器身份",
+                "这会删除浏览器配置目录：\n"
+                f"{self.paths.profile}\n\n"
+                "删除后本机不再被识别为可信设备，下次登录很可能要求"
+                "短信 / 微信二次验证 —— 而且以后每次登录都会要求。\n\n"
+                "确定要重置吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if confirm != QMessageBox.Yes:
+                return
+
         ok = self.store.clear()
-        # 浏览器 profile 里存着登录态，一并清干净
-        try:
-            import shutil
-            if self.paths.profile.exists():
-                shutil.rmtree(self.paths.profile, ignore_errors=True)
-        except Exception:
-            pass
+        if reset_profile:
+            try:
+                import shutil
+                if self.paths.profile.exists():
+                    shutil.rmtree(self.paths.profile, ignore_errors=True)
+                log.info("用户重置了浏览器身份（信任态已删除）。")
+            except Exception as e:
+                log.warning("删除浏览器目录失败：%s", e)
+
         self.page_login.ed_pwd.clear()
         self.cfg.user = ""
         self.cfg.courses = []
@@ -232,10 +332,14 @@ class MainWindow(QMainWindow):
         self.results = {}
         self.save_config()
         self.lb_user.setText("")
-        self.page_login.set_status(
-            "已清除本机保存的账号密码。" if ok else "清除时出了点问题，可手动删除数据目录。",
-            "ok" if ok else "warn")
-        log.info("用户清除了本机保存的凭据。")
+        if ok and reset_profile:
+            msg = ("已清除密码，并重置了浏览器身份。下次登录可能需要二次验证。")
+        elif ok:
+            msg = "已清除本机保存的密码（浏览器登录态保留，下次登录通常不用二次验证）。"
+        else:
+            msg = "清除时出了点问题，可手动删除数据目录。"
+        self.page_login.set_status(msg, "ok" if ok else "warn")
+        log.info("用户清除了本机保存的凭据（重置浏览器身份=%s）。", reset_profile)
 
     # ------------------------------------------------------------------
     def on_add_course(self, entry: CourseEntry):
@@ -252,7 +356,7 @@ class MainWindow(QMainWindow):
     def on_remove_course(self, index: int):
         if 0 <= index < len(self.entries):
             self.entries.pop(index)
-            self.results = {i: v for i, v in enumerate(self.results.values()) if v is not None}
+            # 下标变了，旧的校验结果全部作废（下面重新校验一遍）
             self.results = {}
             self.cfg.set_courses(self.entries)
             self.save_config()
@@ -282,6 +386,7 @@ class MainWindow(QMainWindow):
         cfg.poll_avg = self.page_courses.sp_avg.value()
         cfg.lead_seconds = self.page_courses.sp_lead.value()
         cfg.dry_run = self.page_courses.cb_dry.isChecked()
+        cfg.headless = self.page_courses.headless()
         cfg.xnxq = self.page_courses.current_xnxq() or cfg.xnxq
         cfg.night_silence = (["01:00", "06:00"]
                              if self.page_courses.cb_night.isChecked() else [])
@@ -295,8 +400,9 @@ class MainWindow(QMainWindow):
 
         self.page_monitor.reset(self.entries)
         self.goto(4)
-        log.info("启动任务：模式=%s 课程=%d 门 间隔=%ss 试运行=%s",
-                 cfg.mode, len(self.entries), cfg.poll_avg, cfg.dry_run)
+        log.info("启动任务：模式=%s 课程=%d 门 间隔=%ss 试运行=%s 浏览器=%s",
+                 cfg.mode, len(self.entries), cfg.poll_avg, cfg.dry_run,
+                 "后台无窗口" if cfg.headless else "可见窗口")
         if self.core:
             self.core.do_start()
 
@@ -371,11 +477,23 @@ class MainWindow(QMainWindow):
             if r != QMessageBox.Yes:
                 e.ignore()
                 return
+        elif running and getattr(self.page_login, "_prompt", None) is not None:
+            # 正卡在"等你输验证码"上：说清楚关掉就等于放弃这次登录，
+            # 但绝不能不让关 —— 以前这里会卡住，用户想临时退出都退不掉。
+            r = QMessageBox.question(
+                self, "正在等待验证码",
+                "程序正在等你输入验证码。\n现在关闭会取消这次登录，确定要关闭吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if r != QMessageBox.Yes:
+                e.ignore()
+                return
         self.save_config()
         if self.core:
             try:
+                # shutdown() 会先取消正在等待的人工输入，工作线程才能退出来
                 self.core.shutdown()
-                self.core.wait(8000)
+                if not self.core.wait(8000):
+                    log.warning("工作线程未在 8 秒内退出，仍继续关闭程序。")
             except Exception:
                 pass
         log.info("程序退出。")

@@ -23,6 +23,7 @@
 """
 from __future__ import annotations
 
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlencode
 
-from .humanize import HumanActor, NORMAL, RELAXED, URGENT, wait_for_condition
+from .humanize import HumanActor, NORMAL, URGENT
 
 BASE = "http://zhjwxk.cic.tsinghua.edu.cn/"
 XKLOGIN = BASE + "xklogin.do"
@@ -38,12 +39,14 @@ XK_HOST = "zhjwxk.cic.tsinghua.edu.cn"
 SSO_HOST = "id.tsinghua.edu.cn"
 
 # 课程类别 → 页面/字段/提交动作
+# extra 是这个类别页面额外需要的 URL 参数，缺了它页面会返回错的列表（任选课尤其明显）
 COURSE_KINDS = {
-    "bx": {"name": "必修课", "search": "bxSearch",     "field": "p_bxk_id",  "submit": "saveBxKc"},
-    "xx": {"name": "限选课", "search": "xxSearch",     "field": "p_xx_id",   "submit": "saveXxKc"},
-    "rx": {"name": "任选课", "search": "rxSearch",     "field": "p_rx_id",   "submit": "saveRxKc"},
-    "ty": {"name": "体育课", "search": "tySearch",     "field": "p_rxTy_id", "submit": "saveTyKc"},
-    "cx": {"name": "重修课", "search": "cxSearchTab",  "field": "p_cx_id",   "submit": "saveCxKc"},
+    "bx": {"name": "必修课", "search": "bxSearch",     "field": "p_bxk_id",  "submit": "saveBxKc", "extra": {}},
+    "xx": {"name": "限选课", "search": "xxSearch",     "field": "p_xx_id",   "submit": "saveXxKc", "extra": {}},
+    "rx": {"name": "任选课", "search": "rxSearch",     "field": "p_rx_id",   "submit": "saveRxKc",
+           "extra": {"is_zyrxk": "1"}},
+    "ty": {"name": "体育课", "search": "tySearch",     "field": "p_rxTy_id", "submit": "saveTyKc", "extra": {}},
+    "cx": {"name": "重修课", "search": "cxSearchTab",  "field": "p_cx_id",   "submit": "saveCxKc", "extra": {}},
 }
 KIND_BY_NAME = {v["name"]: k for k, v in COURSE_KINDS.items()}
 
@@ -57,11 +60,19 @@ class PageError(Exception):
 
 
 class NeedSecondFactor(PageError):
-    """登录要求二次认证（短信/微信验证码）。
-
-    这种情况程序自己过不去，必须让真人在浏览器窗口里操作，或者让用户知道
-    该切到「可见窗口」模式。绝不能像以前那样傻等超时。
+    """登录要求二次认证（短信/微信验证码），但程序既没能在主窗口里问到你，
+    也没能打开浏览器窗口。正常流程不该走到这里。
     """
+
+
+class LoginCancelled(PageError):
+    """用户主动取消了登录（点了「取消」或关掉了程序）。"""
+
+
+# 「人工输入」回调的约定：界面收到 (提示语, 图片, 允许的功能, 超时)，
+# 返回下面三种之一 —— 用户填的验证码字符串，或者两个特殊指令。
+HUMAN_RESEND = "__resend__"      # 重新发一次验证码
+HUMAN_VISIBLE = "__visible__"    # 改成在浏览器窗口里完成
 
 
 @dataclass
@@ -123,6 +134,12 @@ class ScholarBrowser:
         self._ctx = None
         self.page = None
         self._loaded: tuple | None = None
+        self.prefer_headless = headless   # 用户的偏好模式（登录临时切可见后要回到这个）
+        # 统一身份认证对短时间内的重复登录很敏感：会回 sso_fail，甚至把要求
+        # 从「直接登录」升级成图形验证码 / 短信二次认证。所以不管是谁来调用
+        # login（界面、调度器、自动重登都会），两次**提交**之间都强制留间隔。
+        self._last_submit_at = 0.0
+        self.min_submit_gap = 10.0
         try:
             from .logging_setup import get_trace_logger
             self.trace = get_trace_logger()
@@ -239,6 +256,136 @@ class ScholarBrowser:
         self._ctx = self._pw = self.page = None
         self._loaded = None
 
+    def restart(self, *, headless: bool | None = None):
+        """换一种有头/无头设置重建浏览器（**profile 目录不变**）。
+
+        为什么强调 profile 不变：统一身份认证的「信任此设备」状态就存在这个
+        目录里。换个目录等于换了一台新电脑，服务端会立刻要求二次验证。
+        """
+        if headless is None:
+            headless = self.headless
+        self.log(f"重新打开浏览器（{'后台无窗口' if headless else '可见窗口'}）…")
+        self._tr(f"restart headless {self.headless} -> {headless}")
+        self.stop()
+        self.headless = headless
+        self.start()
+        try:
+            self.page.bring_to_front()
+        except Exception:
+            pass
+        return self
+
+    def ensure_visible(self, on_progress: Callable[[str], None] | None = None) -> bool:
+        """确保浏览器是「可见窗口」；无头就自动重启成有头。
+
+        二次验证（短信/微信）和图形验证码都必须真人在窗口里点，无头模式下
+        用户看不到也点不到。与其让用户自己去找某个设置项改，不如在需要的那
+        一刻自动换过来。
+
+        返回 True 表示真的重启了。
+        """
+        if not self.headless:
+            try:
+                self.page.bring_to_front()      # 已经在前面了也顺手提到最前
+            except Exception:
+                pass
+            return False
+        self.log("需要你本人操作，正在自动切换为「可见窗口」…", "WARN")
+        if on_progress:
+            try:
+                on_progress("正在打开可见的浏览器窗口，请稍候…")
+            except Exception:
+                pass
+        self.restart(headless=False)
+        return True
+
+    def set_preference(self, headless: bool):
+        """记录用户的偏好模式（登录做完后会回到这个模式）。"""
+        self.prefer_headless = bool(headless)
+
+    # ------------------------------------------------------------------
+    # 浏览器窗口被关掉之后的自我修复
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _looks_closed(exc: BaseException) -> bool:
+        """这个异常是不是「窗口/上下文被关掉了」。"""
+        t = f"{type(exc).__name__}: {exc}".lower()
+        return any(k in t for k in (
+            "has been closed", "targetclosed", "target page", "browser has been closed",
+            "connection closed", "context or browser", "browser closed",
+            "page closed", "session closed",
+        ))
+
+    def is_alive(self) -> bool:
+        """浏览器窗口还在不在。
+
+        用户手动把那个 Chromium 窗口关掉是很常见的操作 —— 以前一旦关掉，
+        后面每个功能都会报「窗口已关闭」然后整个任务就废了。
+        """
+        if self._ctx is None or self.page is None:
+            return False
+        try:
+            return not self.page.is_closed()
+        except Exception:
+            return False
+
+    def revive(self, *, visible: bool = False,
+               on_progress: Callable[[str], None] | None = None) -> bool:
+        """把被关掉的浏览器重新拉起来（**同一个 profile 目录**，登录态还在）。
+
+        visible=False（默认，自动恢复用）：拉到**后台**跑。用户主动关掉那个窗口
+            通常就是不想看见它，我们要是一恢复就把它弹出来，等于跟他对着干。
+        visible=True（需要真人操作时）：拉成可见窗口。
+
+        注意 profile 目录不会变 —— 「信任此设备」的状态就存在里面。
+        """
+        if self.is_alive():
+            return True
+        target_headless = not visible
+        if on_progress:
+            try:
+                on_progress("浏览器窗口已关闭，正在重新打开…")
+            except Exception:
+                pass
+        self.log(f"浏览器窗口已关闭，正在重新打开"
+                 f"（{'后台运行' if target_headless else '可见窗口'}，登录态保留）…", "WARN")
+        try:
+            self.restart(headless=target_headless)
+            self.log("浏览器已重新打开，继续运行。")
+            return True
+        except Exception as e:
+            self.log(f"重新打开浏览器失败：{e}", "ERROR")
+            return False
+
+    def _ensure_alive(self, where: str = ""):
+        """每个页面操作之前先确认窗口还在；不在就自动重开。"""
+        if self.is_alive():
+            return
+        self._tr(f"_ensure_alive({where or '?'}): 窗口已关闭，自动重开")
+        self.revive(on_progress=None)
+        if not self.is_alive():
+            raise PageError(
+                "浏览器窗口已被关闭，而且没能重新打开。请重新点一次「登录」。")
+
+    def _restore_preferred_mode(self, switched: bool, step) -> None:
+        """登录做完后把浏览器收回用户偏好的模式。
+
+        这一步解决的是「难道我要一直开着两个窗口吗」：只在需要真人验证时
+        才把窗口露出来，验证完就收回后台，桌面上只留程序自己的界面。
+        """
+        if not switched or not self.prefer_headless:
+            return
+        try:
+            self.restart(headless=True)
+            if self.is_logged_in():
+                step("登录已完成，浏览器已收回后台运行 —— 桌面上不用一直开着它"
+                     "（会话已保留）。")
+                return
+            self.log("收回后台后会话没保住，改为保留可见窗口。", "WARN")
+            self.restart(headless=False)
+        except Exception as e:
+            self.log(f"切换浏览器模式失败（不影响后续运行）：{e}", "WARN")
+
     def __enter__(self):
         self.start()
         return self
@@ -252,115 +399,368 @@ class ScholarBrowser:
     def login(self, user: str, password: str, *, single_login: bool = True,
               ask_captcha: Callable[[], str | None] | None = None,
               on_progress: Callable[[str], None] | None = None,
-              timeout: float = 150) -> bool:
+              on_human: Callable[[str], None] | None = None,
+              ask_human_code: Callable[..., str | None] | None = None,
+              timeout: float = 150,
+              human_timeout: float = 300,
+              visible_for_login: bool = False) -> bool:
         """用真实浏览器完成统一身份认证。
 
-        on_progress 会在每个阶段被调用，界面据此显示进度 ——
-        登录要几十秒，没有反馈的话用户根本不知道成没成。
+        **默认全程只有一个窗口**：图形验证码和二次验证都由主窗口向你要，
+        程序在后台页面上替你填好并提交（图形验证码还会截图显示在主窗口里）。
+        只有你明确选择「改用浏览器窗口完成」时，才会打开浏览器窗口。
+
+        on_progress       普通阶段提示
+        on_human          需要你本人操作时的提示（界面高亮显示）
+        ask_human_code    要验证码的回调：ask_human_code(提示, image=…,
+                          allow_resend=…, allow_visible=…, timeout=…)
+                          返回验证码字符串，或 HUMAN_RESEND / HUMAN_VISIBLE，
+                          或 None 表示用户取消
+        human_timeout     等真人操作的上限（秒）
+        visible_for_login 强制用可见窗口认证（调度器等没有界面的调用方用）
         """
-        def step(msg: str):
-            self.log(msg)
-            if on_progress:
+        def step(msg: str, human: bool = False):
+            self.log(msg, "WARN" if human else "INFO")
+            cb = on_human if human else on_progress
+            if cb:
                 try:
-                    on_progress(msg)
+                    cb(msg)
                 except Exception:
                     pass
 
         a = self.actor
         a.set_tempo(NORMAL)
-        step("正在启动/连接浏览器…")
-        self.page.goto(XKLOGIN, wait_until="domcontentloaded", timeout=60000)
-        a.ui_pause(0.4, 1.0)
-        self._loaded = None
 
-        if SSO_HOST not in (self.page.url or ""):
-            step("已有有效会话，无需登录。")
-            return True
+        # 窗口可能在等待期间被关掉，先确认它还活着（不在就自动重开）
+        self._ensure_alive("login")
 
-        step("已到达统一身份认证页，准备填写账号…")
-        a.scroll_page(self.page)
-        a.think()
+        # 登录要重新来一遍的内部计数：只在"本来无头、但必须真人操作"时才会用上
+        switched_to_visible = False
+        restarts = 0
+        guard = 0
+        self._did_2fa = False
 
-        if self._captcha_visible():
-            code = ask_captcha() if ask_captcha else None
-            if not code:
-                raise PageError("登录需要图形验证码")
-            a.type_text(self.page, self.page.locator("#i_code"), code)
+        while True:
+            guard += 1
+            if guard > 6:
+                raise NeedSecondFactor(
+                    "登录反复要求人工验证，始终没完成。请检查网络后稍后再试。")
 
-        step("正在输入账号…")
-        a.type_text(self.page, self.page.locator("#i_user"), user)
-        a.ui_pause(0.25, 0.7)
-        step("正在输入密码…")
-        a.type_text(self.page, self.page.locator("#i_pass"), password, clear=False)
-        if single_login:
+            step("正在启动/连接浏览器…")
+            self._goto_login_entry()
+            a.ui_pause(0.4, 1.0)
+            self._loaded = None
+
+            if SSO_HOST not in (self.page.url or ""):
+                step("已有有效会话，无需登录。")
+                self._restore_preferred_mode(switched_to_visible, step)
+                return True
+
+            # ---- 认证方式 ----
+            # 默认**不打开浏览器窗口**：验证码和二次验证都由主窗口问你要，
+            # 程序替你在后台页面上填好、提交。全程只有一个窗口。
+            # 只有在你明确选择「改用浏览器窗口完成」时才会开窗口。
+            need_window = visible_for_login or ask_human_code is None
+            if self.headless and need_window and restarts < 2:
+                if self.ensure_visible(on_progress):
+                    switched_to_visible = True
+                    restarts += 1
+                    continue
+
+            step("已到达统一身份认证页，准备填写账号…")
+            a.scroll_page(self.page)
+            a.think()
+
+            # ---- 图形验证码：截图显示在主窗口里，不用看第二个窗口 ----
+            if self._captcha_visible():
+                box = self.page.locator(self._captcha_selector()).first
+                if ask_human_code is not None:
+                    answer = ask_human_code("请输入图片里的验证码。",
+                                            image=self._captcha_image(),
+                                            allow_resend=False, allow_visible=True,
+                                            timeout=human_timeout)
+                    if answer is None:
+                        raise LoginCancelled("已取消登录。")
+                    if answer == HUMAN_VISIBLE:
+                        if self.ensure_visible(on_progress):
+                            switched_to_visible = True
+                            continue
+                        done = self._wait_human_login(
+                            "请在浏览器窗口里填写图形验证码并点「登录」，程序会自动继续。",
+                            human_timeout, step)
+                        self._restore_preferred_mode(switched_to_visible, step)
+                        return done
+                    a.type_text(self.page, box, answer)
+                else:
+                    code = ask_captcha() if ask_captcha else None
+                    if not code:
+                        raise PageError("登录需要图形验证码")
+                    a.type_text(self.page, box, code)
+
+            step("正在输入账号…")
+            user_box = self.page.locator("#i_user")
+            # 实测踩过：记完信任后学校会自己跳转，如果这时重走登录，可能落到
+            # 一个**没有登录表单**的页面上（可能是中转页或已经登录了）。
+            # 这时候硬填 #i_user 会抛 15 秒超时，把一次本该成功的登录搞失败。
+            if user_box.count() == 0:
+                self.log("当前页面没有登录表单，先确认会话是否已经好了。", "WARN")
+                if self.is_logged_in():
+                    step("✅ 已经登录成功。")
+                    self._restore_preferred_mode(switched_to_visible, step)
+                    return True
+                raise PageError(
+                    f"登录页看起来不对（找不到账号输入框），页面停在："
+                    f"{(self.page.url or '')[:90]}")
+            # 真实页面会把已经填好的账号设成 readonly（
+            #   if ($("#i_user").val() != "") { $("#i_user").attr("readonly","readonly"); }
+            # ）。这时别去填 —— 对只读元素 fill/type 会直接抛「元素不可编辑」。
+            readonly, prefill = None, ""
             try:
-                a.check(self.page, self.page.locator('#theform input[name="singleLogin"]').first)
-                step("已勾选「信任/单点登录」。")
+                readonly = user_box.get_attribute("readonly")
+                prefill = (user_box.input_value() or "").strip()
             except Exception:
                 pass
-        a.think()
-        step("正在提交登录…")
-        a.click(self.page, self.page.locator("a[onclick*='doLogin']").first)
-        step("已提交，等待服务器响应（这一步有时要几十秒）…")
+            if readonly is not None and prefill:
+                self._tr("#i_user 只读且已预填，跳过输入")
+                step("账号已由登录页自动填好，跳过输入。")
+            else:
+                a.type_text(self.page, user_box, user)
+            a.ui_pause(0.25, 0.7)
+            step("正在输入密码…")
+            a.type_text(self.page, self.page.locator("#i_pass"), password, clear=False)
 
-        ok = self._wait_landing(timeout, on_progress=on_progress)
-        if not ok:
+            if single_login:
+                try:
+                    a.check(self.page,
+                            self.page.locator('#theform input[name="singleLogin"]').first)
+                    step("已勾选「信任/单点登录」。")
+                except Exception as e:
+                    # 勾不上就等于每次登录都被当成新设备，必然被要求二次认证。
+                    # 这里以前是静默 pass，出了问题日志里一个字都没有。
+                    self.log(f"⚠ 没勾上「信任/单点登录」（{e}）——"
+                             f"少了它下次登录很可能被要求二次认证。", "WARN")
+
+            a.think()
+            step("正在提交登录…")
+            self._respect_sso_cooldown(on_progress)
+            a.click(self.page, self.page.locator("a[onclick*='doLogin']").first)
+            step("已提交，等待服务器响应（这一步有时要几十秒）…")
+
+            status = self._wait_landing(timeout, on_progress=on_progress)
+
+            if status == "ok":
+                step(f"登录成功！落地页：{(self.page.url or '')[:70]}")
+                self._restore_preferred_mode(switched_to_visible, step)
+                return True
+
+            if status == "need_human":
+                # ---- 首选：在程序主窗口里完成，不开浏览器窗口 ----
+                if ask_human_code is not None and not getattr(self, "_did_2fa", False):
+                    solved = self._solve_second_factor_here(step, ask_human_code,
+                                                            human_timeout)
+                    if solved:
+                        self._restore_preferred_mode(switched_to_visible, step)
+                        return True
+
+                # 已经完整走过一次二次验证（选了「记为信任」或「否」）却还停在
+                # 验证页 —— 实测这是选「否」时的正常现象：学校会立刻再问一遍。
+                # 这时候直接重走一次登录就能进去（会话其实已经建立好了），
+                # 不必去麻烦用户开浏览器窗口。
+                if getattr(self, "_did_2fa", False) and restarts < 2:
+                    restarts += 1
+                    self.log("二次验证已走完但学校又要求验证一次，"
+                             "先等它自己跳转完。", "WARN")
+                    step("正在确认登录状态…", human=True)
+                    # 学校那边可能正在 redirect2Jsp 上自己跳，先给它 12 秒；
+                    # 跳过去就直接进系统了，不用重走登录。
+                    if self._wait_landing(12, on_progress=None) == "ok":
+                        step("✅ 二次验证通过，已进入选课系统。")
+                        self._restore_preferred_mode(switched_to_visible, step)
+                        return True
+                    if getattr(self, "_trust_choice", "") == "否":
+                        # 没登记信任设备 → 下次登录还会要验证码，这是正常的，
+                        # 不是错误。直接说清楚就收尾。
+                        raise PageError(
+                            "二次验证已经通过了，但你没把本机登记为「信任设备」，"
+                            "所以这次登录到此为止。下次登录还会要验证码 —— "
+                            "想免验证码就在最后那一步选「是」。")
+                    self.log("页面没有自己跳转，重新走一次登录入口。", "WARN")
+                    continue
+
+                # ---- 页面认不出来：只问"要不要开窗口"，绝不擅自开 ----
+                if ask_human_code is not None:
+                    answer = ask_human_code(
+                        "这个验证页面程序没法自动认出来，需要打开浏览器窗口，"
+                        "由你在里面完成。",
+                        image=None, allow_resend=False, allow_visible=True,
+                        allow_code=False, timeout=human_timeout)
+                    if answer != HUMAN_VISIBLE:
+                        # 用户没明确要开窗口（取消、或超时）—— 那就别开
+                        raise LoginCancelled("已取消登录。")
+                if self.headless and restarts < 2 and self.ensure_visible(on_progress):
+                    switched_to_visible = True
+                    restarts += 1
+                    continue
+                done = self._wait_human_login(
+                    "本次登录要求二次认证（短信 / 微信验证码）。请在已经打开的"
+                    "浏览器窗口里输入收到的验证码，程序会自动继续。",
+                    human_timeout, step)
+                self._restore_preferred_mode(switched_to_visible, step)
+                return done
+
+            # ---- 失败：尽量说清楚是哪一种 ----
             body = self._safe_body_text()
+            url = self.page.url or ""
             if "验证码" in body:
                 raise PageError("登录要求验证码")
             if "不正确" in body or "密码错误" in body:
                 raise PageError("用户名或密码不正确")
-            if "sso_fail" in (self.page.url or ""):
-                raise PageError("统一身份认证票据校验失败（短时间内登录过于频繁，请稍后再试）")
-            raise PageError(f"登录失败，页面停在：{(self.page.url or '')[:90]}")
-        step(f"登录成功！落地页：{(self.page.url or '')[:70]}")
+            if "sso_fail" in url:
+                raise PageError("统一身份认证票据校验失败"
+                                "（短时间内登录过于频繁，请等几分钟再试）")
+            raise PageError(f"登录失败，页面停在：{url[:90]}")
+
+        raise NeedSecondFactor("需要你在浏览器窗口里完成二次验证，但可见窗口没能打开。")
+
+    def _respect_sso_cooldown(self, on_progress=None):
+        """两次提交登录之间强制留出间隔，避免自己把自己搞成「异常登录」。
+
+        实测：短时间内连续提交会被判 sso_fail，甚至把要求升级成图形验证码 /
+        二次认证。原型里的探针也是靠 3~30 秒的间隔才跑得稳。
+        """
+        gap = float(getattr(self, "min_submit_gap", 10.0) or 0.0)
+        last = float(getattr(self, "_last_submit_at", 0.0) or 0.0)
+        if last and gap > 0:
+            wait = gap - (time.time() - last)
+            if wait > 0:
+                self.log(f"距上次提交登录才 {time.time() - last:.0f} 秒，"
+                         f"为避免被当成异常登录，等 {wait:.0f} 秒再提交。", "WARN")
+                if on_progress:
+                    try:
+                        on_progress(f"为免触发风控，等 {wait:.0f} 秒后重新提交登录…")
+                    except Exception:
+                        pass
+                end = time.time() + wait
+                while time.time() < end:
+                    try:
+                        self.page.wait_for_timeout(250)
+                    except Exception:
+                        time.sleep(0.25)
+        self._last_submit_at = time.time()
+
+    def _wait_human_login(self, hint: str, human_timeout: float, step) -> bool:
+        """把窗口交给真人，等他完成验证码 / 二次认证，然后确认真的进去了。"""
+        step(hint, human=True)
+        t0 = time.time()
+        last_tick = 0
+        while time.time() - t0 < human_timeout:
+            # 用户可能把窗口关了（或者误关）—— 重新打开并把窗口提到最前，
+            # 否则他会一直盯着屏幕等，而程序在等一个已经不存在的页面。
+            if not self.is_alive():
+                if self.revive(visible=True, on_progress=None):
+                    step("浏览器窗口被关闭了，已重新打开。请在这个新窗口里继续完成验证。",
+                         human=True)
+                    continue
+            try:
+                self.page.bring_to_front()
+            except Exception:
+                pass
+            if self._landed():
+                step(f"✅ 验证已完成，已进入选课系统（用时 {time.time() - t0:.0f} 秒）。")
+                return True
+            # 万一停在"是否记为信任浏览器"那一步，也按用户的选择处理 ——
+            # 否则页面永远不跳转（学校不会自动跳）。
+            if self._trust_radios():
+                self._solve_trust_step(step, None, human_timeout)
+            elapsed = int(time.time() - t0)
+            if elapsed >= last_tick + 15:
+                last_tick = elapsed
+                # 走普通进度通道：只刷新"进度"那一行，别把上面那块
+                # 「需要你本人操作」的指引文字覆盖掉 —— 用户随时看都还在。
+                step(f"仍在等你完成验证…（已 {elapsed} 秒）")
+            try:
+                self.page.wait_for_timeout(500)
+            except Exception:
+                time.sleep(0.5)
+        raise NeedSecondFactor(
+            f"等了 {human_timeout / 60:.0f} 分钟仍未看到验证完成。"
+            f"请在浏览器窗口里完成短信 / 微信验证后，再点一次「登录」。")
+
+    def _landed(self) -> bool:
+        """当前是不是已经真的落进教务系统内部页面。
+
+        比原来的「URL 里有选课域名」严格：认证域、二次认证页、
+        以及会话失效的那种几百字节小页面都不算。
+        """
+        try:
+            u = self.page.url or ""
+        except Exception:
+            return False
+        if "sso_fail" in u or SSO_HOST in u:
+            return False
+        if XK_HOST not in u:
+            return False
+        try:
+            if self._is_second_factor_page():
+                return False
+        except Exception:
+            pass
+        try:
+            if len(self.page.content()) < 1500:      # 登陆超时那种小页面
+                return False
+        except Exception:
+            pass
         return True
 
-    def _wait_landing(self, timeout: float, on_progress=None) -> bool:
+    def _goto_login_entry(self) -> None:
+        """打开选课系统入口（xklogin.do）。
+
+        注意：页面**可能正在自己跳转**（二次验证成功后，学校那边会执行
+        window.location.href = redirectUrl）。这时我们的导航会被 abort，
+        报 net::ERR_ABORTED —— 实测踩过，不能把它当成登录失败。
+        所以这里等它跳完再试一次。
+        """
+        for attempt in range(2):
+            try:
+                self.page.goto(XKLOGIN, wait_until="domcontentloaded", timeout=60000)
+                return
+            except Exception as e:
+                msg = str(e)
+                racy = ("ERR_ABORTED" in msg or "interrupted" in msg.lower()
+                        or "navigation" in msg.lower())
+                if attempt == 0 and racy:
+                    self.log("导航被页面自身的跳转打断了，等它跳完再试一次。", "WARN")
+                    try:
+                        self.page.wait_for_timeout(2000)
+                    except Exception:
+                        time.sleep(2)
+                    continue
+                raise
+
+    def _wait_landing(self, timeout: float, on_progress=None) -> str:
         """等真正落进教务系统内部页面。
 
-        中途可能出现的几种情况都要认出来：
-          * sso_fail         —— 票据校验失败
-          * 二次认证页面      —— 必须真人操作，不能傻等
-          * 中间跳转页        —— 继续等
+        返回：
+            "ok"          已经进去
+            "need_human"  需要真人操作（二次认证页）
+            "fail"        sso_fail 或超时
         """
         t0 = time.time()
         end = t0 + timeout
-        reported_2fa = False
+        reported = False
         while time.time() < end:
-            try:
-                u = self.page.url or ""
-            except Exception:
-                u = ""
+            u = self.page.url or ""
             if "sso_fail" in u:
-                return False
+                return "fail"
 
-            # 二次认证：这是必须让真人介入的情况
             if self._is_second_factor_page():
-                if not reported_2fa:
-                    reported_2fa = True
-                    if self.headless:
-                        # 无头模式下用户看不到、点不到，直接报错说清楚
-                        raise NeedSecondFactor(
-                            "本次登录要求二次认证（短信/微信验证码），"
-                            "但当前是「后台无窗口」模式，你看不到验证页面。\n"
-                            "请到「运行设置」把浏览器改成「可见窗口」，"
-                            "重新登录后在弹出的窗口里完成验证即可。")
-                    self.log("⚠ 本次登录要求二次认证。请在浏览器窗口里按提示"
-                             "完成验证（短信 / 微信），程序会继续等待，最多 5 分钟。", "WARN")
-                if on_progress:
-                    on_progress("等待你在浏览器窗口中完成二次认证…")
-                # 给足时间让用户操作
-                if time.time() - t0 > 300:
-                    raise NeedSecondFactor("二次认证等待超时（5 分钟）。")
-                try:
-                    self.page.wait_for_timeout(500)
-                except Exception:
-                    time.sleep(0.5)
-                continue
+                if not reported:
+                    reported = True
+                    self.log("⚠ 本次登录要求二次认证（短信 / 微信验证码）。", "WARN")
+                return "need_human"
 
-            if XK_HOST in u and ("m=" in u or "zhjw.do" in u or "xsxk_index" in u):
-                return True
+            if self._landed():
+                return "ok"
 
             if on_progress and int(time.time() - t0) % 3 == 0:
                 on_progress(f"等待跳转中…（已 {time.time()-t0:.0f} 秒）")
@@ -368,29 +768,760 @@ class ScholarBrowser:
                 self.page.wait_for_timeout(350)
             except Exception:
                 time.sleep(0.35)
-        return XK_HOST in (self.page.url or "") and "sso_fail" not in (self.page.url or "")
+        return "ok" if self._landed() else "fail"
 
     def _is_second_factor_page(self) -> bool:
-        """判断当前是不是统一身份认证的二次验证页面。"""
+        """判断当前是不是统一身份认证的二次验证页面。
+
+        除了 URL 和文案，还认**真实源码里的标记** —— 二次验证前端
+        （doubleAuth.bundle.js）一定会渲染出：
+            <input name="vericode" id="vericode" maxlength="6">
+            <input type="hidden" name="action" value="VERITY_CODE">
+        这比猜文案可靠得多（URL 里未必有 doubleauth，页面上也未必写着"二次认证"）。
+        """
         try:
             u = (self.page.url or "").lower()
             if "doubleauth" in u or "checksecond" in u:
                 return True
-            # 只在认证域下判断，避免误伤其它页面
+            for sel in self._SECOND_FACTOR_MARKERS:
+                try:
+                    if self.page.locator(sel).count() > 0:
+                        return True
+                except Exception:
+                    continue
+            # 只在认证域下按文案判断，避免误伤其它页面
             if SSO_HOST not in (self.page.url or ""):
                 return False
             html = self.page.content()[:6000]
+            # ⚠ 实测踩过：验证**通过之后**的中转页会写着
+            #   「二次验证成功……是否将本次登录使用的设备记为信任浏览器？」
+            # 里面同样含"二次验证"四个字。以前会把它误判成"还要验证"，
+            # 于是白等 60 秒、最后还要重来一遍。
+            if any(k in html for k in ("验证成功", "正在跳转", "记为信任浏览器")):
+                return False
             return ("二次认证" in html or "二次验证" in html
                     or "doubleAuth" in html or "需要二次" in html)
         except Exception:
             return False
 
-    def _captcha_visible(self) -> bool:
+    def _captcha_selector(self) -> str:
+        """图形验证码输入框。SSO 页上有 #i_code，也有版本用 #c_code。"""
+        return "#i_code, #c_code"
+
+    # 验证码输入框的候选选择器。
+    # 头两个取自学校二次验证前端的真实源码（doubleAuth.bundle.js）：
+    #     Input({autoFocus:true, inputMode:"numeric", maxLength:6,
+    #            name:"vericode", id:"vericode"})
+    # 后面的是图形验证码和兜底。注意 input[type=text] 很宽松 ——
+    # 登录表单里的 #i_user 也是 text，所以下面还要按 name 排掉它。
+    _CODE_INPUT_SELECTORS = (
+        "#vericode", "input[name='vericode']",
+        "#i_code", "#c_code", "#code", "#smsCode", "#authCode",
+        "input[name*='code' i]", "input[id*='code' i]",
+        "input[name*='verify' i]", "input[id*='verify' i]",
+        "input[autocomplete='one-time-code']",
+        "input[inputmode='numeric']",
+        "input[placeholder*='验证码']", "input[placeholder*='校验码']",
+        "input[type=tel]", "input[maxlength='6']", "input[maxlength='4']",
+        "input[type=text]",
+    )
+    # 二次验证页的精确标记（同样来自真实源码）
+    _SECOND_FACTOR_MARKERS = (
+        "#vericode", "input[name='vericode']",
+        "input[name='action'][value='VERITY_CODE']",
+        "input[name='action'][value='VERITY_CARD_CODE']",
+    )
+    _LOGIN_FIELD_NAMES = ("i_user", "i_pass", "user", "pass", "username",
+                          "password", "j_username", "j_password")
+    _SUBMIT_TEXTS = ("提交", "确定", "确认", "验证", "下一步", "完成", "继续", "登录")
+    _RESEND_TEXTS = ("重新发送", "重发", "再次发送", "获取验证码", "发送验证码", "发送")
+
+    def _visible_locator(self, selector: str):
+        """返回第一个可见的元素；没有就返回 None。"""
         try:
-            loc = self.page.locator("#i_code")
-            return loc.count() > 0 and loc.is_visible()
+            loc = self.page.locator(selector).first
+            if loc.count() and loc.is_visible():
+                return loc
         except Exception:
+            pass
+        return None
+
+    def _find_code_input(self):
+        """在验证页面上找「验证码输入框」。找不到返回 None。"""
+        for sel in self._CODE_INPUT_SELECTORS:
+            loc = self._visible_locator(sel)
+            if loc is None:
+                continue
+            try:
+                name = (loc.get_attribute("name") or "").strip().lower()
+                if name in self._LOGIN_FIELD_NAMES:
+                    continue                      # 这是账号框，不是验证码框
+                typ = (loc.get_attribute("type") or "").lower()
+                if typ in ("password", "hidden", "submit", "button", "checkbox"):
+                    continue
+            except Exception:
+                pass
+            return loc
+        return None
+
+    # 可点元素的标签。注意：`a, b:has-text('x')` 这种写法里 :has-text() 只作用于
+    # 最后一个标签，前面的会变成"任意元素都算"—— 所以必须逐个标签拼选择器。
+    _CLICKABLE_TAGS = ("button", "a", "input[type=button]", "input[type=submit]",
+                       "span", "div")
+    # 找「提交」时要排掉这些词，否则「获取验证码」这种按钮会被当成提交按钮
+    _NOT_SUBMIT_WORDS = ("发送", "获取", "重发", "重新")
+
+    def _find_by_texts(self, texts, tags=None, exclude_words=()):
+        """按可见文字找一个可点的控件。"""
+        tags = tags or self._CLICKABLE_TAGS
+        for t in texts:
+            for tag in tags:
+                try:
+                    loc = self.page.locator(f"{tag}:has-text('{t}')").first
+                    if not (loc.count() and loc.is_visible()):
+                        continue
+                    # 别把一大块容器当成按钮
+                    box = loc.bounding_box()
+                    if box and box["height"] > 80:
+                        continue
+                    if exclude_words:
+                        try:
+                            txt = (loc.inner_text() or "")
+                        except Exception:
+                            txt = ""
+                        if any(w in txt for w in exclude_words):
+                            continue
+                    return loc
+                except Exception:
+                    continue
+        return None
+
+    def _find_submit_button(self):
+        return self._find_by_texts(self._SUBMIT_TEXTS,
+                                   exclude_words=self._NOT_SUBMIT_WORDS)
+
+    def _find_resend_control(self):
+        return self._find_by_texts(self._RESEND_TEXTS, tags=("a", "button", "span"))
+
+    def _captcha_image(self) -> bytes | None:
+        """把图形验证码截成 PNG —— 好显示在**程序主窗口**里。
+
+        这样用户不用去看第二个窗口：验证码图片直接出现在程序界面里。
+        """
+        for sel in ("img#captcha", "img[id*='captcha' i]", "img[src*='captcha' i]",
+                    "img[id*='code' i]", "img[src*='code' i]",
+                    "img[src*='validate' i]", "#i_code ~ img", "#c_code ~ img",
+                    "#theform img"):
+            loc = self._visible_locator(sel)
+            if loc is None:
+                continue
+            try:
+                data = loc.screenshot()
+                if data and len(data) > 100:
+                    return data
+            except Exception:
+                continue
+        return None
+
+    # 二次验证「选择方式」页上的取值（取自真实页面 HTML）：
+    #   <input name="type" type="radio" value="wechat" checked> 发送到您的微信
+    #   <input name="type" type="radio" value="mobile">         发送短信到手机
+    _METHOD_LABELS = {"mobile": "发短信到我手机", "wechat": "发到我的企业微信"}
+
+    # 验证通过之后的「是否记为信任浏览器」也复用 name=type，但取值是「是」/「否」。
+    # 必须按 value 区分 —— 否则会把这一步误当成"选择验证方式"。
+    _TRUST_VALUES = ("是", "否")
+
+    def _trust_radios(self) -> list:
+        """「是否将本次登录使用的设备及浏览器记为信任浏览器」的单选按钮。
+
+        真实源码（doubleAuth.bundle.js）：
+            <input type="radio" name="type" value="是">  是，记为信任（180天）
+            <input type="radio" name="type" value="否" defaultChecked> 否
+            <Button onClick={handleConfirm}>确定</Button>
+            → POST /b/doubleAuth/personal/saveFinger {radioVal:…}
+            → 成功后 window.location.href = redirectUrl（**不会自动跳**）
+        """
+        out = []
+        try:
+            radios = self.page.locator("input[type=radio][name='type']")
+            n = radios.count()
+        except Exception:
+            return out
+        for i in range(n):
+            r = radios.nth(i)
+            try:
+                if not r.is_visible():
+                    continue
+                v = (r.get_attribute("value") or "").strip()
+            except Exception:
+                continue
+            if v in self._TRUST_VALUES:
+                out.append((r, v))
+        return out
+
+    def _solve_trust_step(self, step, ask=None, human_timeout: float = 300.0) -> bool:
+        """处理「是否记为信任浏览器」这一步。
+
+        **这一步不处理就永远登不进去**：验证码通过后学校不自动跳转，而是问
+        你要不要把本设备记为信任，必须选一个再点「确定」，它才 POST
+        saveFinger 然后跳转。
+
+        ⚠ 「选是还是选否」**不在这一步问** —— 用户在登录表单上早就回答过了：
+        那个「信任此浏览器（会话过期后免密码重登）」勾选框（name=singleLogin，
+        页面原话是「本次登录使用信任浏览器访问校内其他系统时不必再输入账号
+        密码（统一登录）」）说的就是这件事。
+
+        两边必须一致：一开始勾了"我要用信任浏览器"、最后又答"否"，等于自己
+        打自己脸 —— 页面上那句「否(您本次登录未使用可信浏览器，将无法支持
+        统一登录。)」写得很清楚，学校就不发统一登录票据，于是又弹回验证页，
+        重走登录也没用（实测就是死循环）。所以这里直接跟随那个勾选框。
+        """
+        radios = self._trust_radios()
+        if not radios:
             return False
+        btn = self._find_by_texts(("确定", "确认"))
+        if btn is None:
+            return False
+
+        want = None
+        if ask is not None:
+            # 这一步**和登录表单上的「信任此浏览器」不是一回事**，别混：
+            #   * 登录表单那个（singleLogin）：接下来登录别的校内系统不用再输
+            #     账号密码（统一登录票据），只管这一次会话
+            #   * 这一步（saveFinger）：把**本设备**登记为信任设备，之后退出
+            #     再登录不用验证码，学校给 180 天
+            # 所以必须单独问一次，不能拿前者去替用户决定后者。
+            try:
+                ans = ask("学校问：是否把本设备登记为「信任设备」？\n"
+                          "（登记后 180 天内这台电脑再登录都不用输验证码）",
+                          choices=[
+                              {"label": "是，登记（之后免验证码）",
+                               "value": "__choice__:是"},
+                              {"label": "否，这次不登记（下次还要验证码）",
+                               "value": "__choice__:否"},
+                          ],
+                          allow_code=False, allow_visible=False,
+                          timeout=human_timeout)
+            except TypeError:
+                ans = None          # 回调不接受 choices 时按下面的默认走
+            if isinstance(ans, str) and ans.startswith("__choice__:"):
+                want = ans.split(":", 1)[1].strip()
+            elif ans is None:
+                self.log("用户没有回答是否登记信任设备，按默认（是）处理。", "WARN")
+        if want not in self._TRUST_VALUES:
+            # 没界面可问（调度器自动重登）：必须选一个，否则页面不跳转、
+            # 登录就废了。程序长期自动重登显然需要免验证码，所以选「是」。
+            want = "是"
+            self._tr(f"没有界面可询问，默认登记为信任设备：{want}")
+
+        self._tr(f"「记为信任设备」最终选择：{want}")
+        if want == "是":
+            step("已把本机登记为「信任设备」（180 天内再登录不用验证码）。",
+                 human=True)
+        else:
+            step("这次不登记信任设备 —— 下次登录还会要验证码。", human=True)
+
+        pick = next((r for r, v in radios if v == want), None) or radios[0][0]
+        self._trust_choice = want
+        try:
+            self.actor.check(self.page, pick)
+        except Exception:
+            try:
+                pick.check(timeout=4000)
+            except Exception as e:
+                self.log(f"勾选「{want}」失败：{e}", "WARN")
+        try:
+            self.actor.click(self.page, btn)
+        except Exception as e:
+            self.log(f"点「确定」失败：{e}", "WARN")
+            return False
+        return True
+
+    def _code_method_radios(self) -> list:
+        """二次验证第一步的「选择验证方式」单选按钮。
+
+        返回 [(locator, value, 显示文字)]。
+
+        实测（2026-09-14 用 Edge+无头逼出来的真实页面）：
+            URL  https://id.tsinghua.edu.cn/do/off/ui/auth/login/check
+            <input name="type" type="radio" value="wechat" checked>
+            <input name="type" type="radio" value="mobile">
+            <button type="submit">确定</button>
+            正文：为保障您的账号安全，本次登录需要进行二次验证。
+                  请选择以下方式之一获取验证码：
+
+        **这一步必须处理**：不选方式、不点「确定」，学校根本不会发验证码，
+        也就永远不会出现 #vericode 输入框。以前直接去找输入框，找不到就
+        误判成"页面认不出来"，然后问用户要不要开浏览器窗口。
+        """
+        out = []
+        try:
+            radios = self.page.locator("input[type=radio][name='type']")
+            n = radios.count()
+        except Exception:
+            return out
+        for i in range(n):
+            r = radios.nth(i)
+            try:
+                if not r.is_visible():
+                    continue
+            except Exception:
+                continue
+            value = ""
+            label = ""
+            try:
+                value = (r.get_attribute("value") or "").strip()
+            except Exception:
+                pass
+            # 「是/否」是"记为信任浏览器"那一步的选项，不是验证方式，跳过
+            if value in self._TRUST_VALUES:
+                continue
+            try:
+                # 单选按钮的文字就在它**后面**的同级节点里。
+                # 不能用 closest('label')：实测外层 label 把两个选项都包住了，
+                # 那样两项会取到同一段文字（第二项会错显成第一项的文案）。
+                label = (r.evaluate(r"""el => {
+                    let t = '';
+                    let n = el.nextSibling;
+                    while (n) {
+                        if (n.nodeType === 3) t += n.textContent;
+                        else if (n.nodeType === 1) t += (n.innerText || n.textContent || '');
+                        n = n.nextSibling;
+                    }
+                    return t.trim();
+                }""") or "").strip()
+            except Exception:
+                pass
+            # 显示名优先用我们自己起的简短中文 —— 学校那句太长了，
+            # 放在按钮上不好看；认不出的取值才退回页面原文。
+            label = self._METHOD_LABELS.get(value) or label or value or f"方式{i + 1}"
+            out.append((r, value, " ".join(label.split())))
+        return out
+
+    def _wait_method_page(self, timeout: float = 12.0) -> bool:
+        """等「选择验证方式」这一屏渲染出来。
+
+        二次验证页是 React 单页应用，页面加载完 ≠ 表单画好了。实测：刚检测到
+        二次验证时按钮还没渲染出来，看一眼就断言"认不出来"会误判成失败。
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            if self._code_method_radios() and \
+                    self._find_by_texts(("确定", "确认", "下一步", "继续")) is not None:
+                return True
+            try:
+                self.page.wait_for_timeout(250)
+            except Exception:
+                time.sleep(0.25)
+        return False
+
+    def _solve_method_selection(self, step, ask, human_timeout: float) -> str:
+        """处理「选择验证方式 + 点确定」这一步。
+
+        返回 "sent"（已请求发送验证码）/ "visible"（用户要求改用浏览器窗口）
+        / "cancel"（用户取消）/ "none"（这一步不存在或没做成）。
+        """
+        radios = self._code_method_radios()
+        if not radios:
+            return "none"
+        btn = self._find_by_texts(("确定", "确认", "下一步", "继续", "提交"))
+        if btn is None:
+            return "none"
+
+        values = [v for _, v, _ in radios]
+        labels = [lab or v or f"方式{i+1}" for i, (_, v, lab) in enumerate(radios)]
+        self._tr(f"验证方式选项：{list(zip(values, labels))}")
+
+        # 默认选短信：手机上收验证码最省事（页面默认选的是微信）
+        default_idx = 0
+        for i, v in enumerate(values):
+            if v == "mobile" or "短信" in labels[i] or "手机" in labels[i]:
+                default_idx = i
+                break
+
+        idx = default_idx
+        if len(radios) > 1 and ask is not None:
+            choices = [{"label": labels[i], "value": f"__choice__:{i}"}
+                       for i in range(len(radios))]
+            ans = ask("学校要求二次验证。请选择验证码发到哪里：",
+                      choices=choices, allow_code=False, allow_visible=True,
+                      timeout=human_timeout)
+            if ans is None:
+                return "cancel"
+            if ans == HUMAN_VISIBLE:
+                return "visible"
+            if isinstance(ans, str) and ans.startswith("__choice__:"):
+                try:
+                    idx = int(ans.split(":", 1)[1])
+                    if not (0 <= idx < len(radios)):
+                        idx = default_idx
+                except Exception:
+                    idx = default_idx
+
+        if not self._click_method(radios[idx][0], btn, labels[idx], step):
+            return "none"
+        try:
+            self.page.wait_for_timeout(1800)
+        except Exception:
+            time.sleep(1.8)
+        return "sent"
+
+    def _click_method(self, radio, btn, label: str, step) -> bool:
+        """选中某个方式并点「确定」。"""
+        try:
+            self.actor.check(self.page, radio)
+        except Exception:
+            try:
+                radio.check(timeout=4000)
+            except Exception as e:
+                self.log(f"选中「{label}」失败：{e}", "WARN")
+        step(f"已选择「{label}」，正在请学校发送验证码…", human=True)
+        try:
+            self.actor.click(self.page, btn)
+        except Exception as e:
+            self.log(f"点「确定」失败：{e}", "WARN")
+            return False
+        return True
+
+    def _try_other_method(self, step) -> bool:
+        """换一种验证方式重新请求验证码（短信 ↔ 微信）。"""
+        radios = self._code_method_radios()
+        if len(radios) < 2:
+            return False
+        btn = self._find_by_texts(("确定", "确认", "下一步", "继续", "提交"))
+        if btn is None:
+            return False
+        checked = 0
+        for i, (r, _v, _lab) in enumerate(radios):
+            try:
+                if r.is_checked():
+                    checked = i
+                    break
+            except Exception:
+                pass
+        other = 1 - checked if len(radios) == 2 else (checked + 1) % len(radios)
+        r, _v, lab = radios[other]
+        self.log(f"改用「{lab}」重新发送验证码。", "WARN")
+        if not self._click_method(r, btn, lab, step):
+            return False
+        try:
+            self.page.wait_for_timeout(1800)
+        except Exception:
+            time.sleep(1.8)
+        return True
+
+    def _fill_code(self, box, code: str) -> bool:
+        """用**真实键盘**把验证码一个字一个字敲进去，敲完回读确认。
+
+        刻意**不用** JS 直接设 value：这个项目的原则就是"像人一样操作"，
+        而且合成出来的事件 isTrusted=false，本身就是最典型的脚本特征。
+
+        为什么敲完要回读：二次验证页是 React 受控组件，个别情况下值没进
+        state，提交时服务端收到的是空 —— 表现就是"验证码明明对着却总说不对"。
+        回读能当场发现，然后**重新敲一遍**（而不是用 JS 硬塞）。
+        """
+        for attempt in range(3):
+            try:
+                self.actor.click(self.page, box)          # 真实鼠标点击聚焦
+            except Exception:
+                try:
+                    box.click(timeout=5000)
+                except Exception:
+                    pass
+            try:
+                box.fill("")                              # 清掉可能的残留
+            except Exception:
+                pass
+            try:
+                # press_sequentially：逐字符真实 keydown/keypress/keyup
+                box.press_sequentially(code, delay=random.uniform(60, 140))
+            except Exception:
+                try:
+                    for ch in code:
+                        box.press(ch)
+                        time.sleep(random.uniform(0.06, 0.14))
+                except Exception as e:
+                    self.log(f"键入验证码失败（第 {attempt + 1} 次）：{e}", "WARN")
+                    continue
+            got = ""
+            try:
+                got = (box.input_value() or "").strip()
+            except Exception:
+                pass
+            if got == code:
+                return True
+            self.log(f"回读发现框里是「{got}」而不是验证码，重新敲一遍。", "WARN")
+            try:
+                self.page.wait_for_timeout(350)
+            except Exception:
+                time.sleep(0.35)
+        return False
+
+    def _confirm_seems_submitted(self, before_hint: str, box,
+                                 timeout: float = 6.0) -> bool:
+        """点完「确定」后，判断这次点击到底生效没有。
+
+        任一条成立就算生效：URL 变了 / 验证码输入框没了 / 页面出现了新提示。
+        都没发生 → 多半这次点击没落上，值得用原生点击再补一次。
+        """
+        u0 = ""
+        try:
+            u0 = self.page.url
+        except Exception:
+            pass
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if self.page.url != u0:
+                    return True
+                if box is None or box.count() == 0:
+                    return True
+                if self._page_hint(160) != before_hint:
+                    return True
+            except Exception:
+                return True
+            try:
+                self.page.wait_for_timeout(250)
+            except Exception:
+                time.sleep(0.25)
+        return False
+
+    def _page_hint(self, limit: int = 200) -> str:
+        """抓页面上的提示语（二次验证页会把服务端的出错信息显示出来）。"""
+        try:
+            return " ".join((self.page.inner_text("body") or "").split())[:limit]
+        except Exception:
+            return ""
+
+    def _wait_landing_or_error(self, timeout: float = 25.0) -> str:
+        """提交验证码之后，等「进系统」或「服务端报错」。
+
+        实测（真实接口 /b/doubleAuth/login）：对错都是 1 秒内就回，
+        并且页面会立刻显示服务端的话。例如
+            {"result":"error","msg":"校验码已失效，请重新发送。"}
+        所以要盯这个，而不是傻等 90 秒 —— 学校发的验证码只有 **3 分钟**
+        有效期，白等就是真过期。
+
+        返回 "ok" / "trust"（到了"记为信任"那一步）/ "error" / "timeout"。
+        """
+        base = self._page_hint(200)
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if self._landed():
+                    return "ok"
+                # 验证通过后学校会问"是否记为信任浏览器"—— 那也是页面变了，
+                # 但它是好消息，不能当成出错
+                if self._trust_radios():
+                    return "trust"
+                if self._page_hint(200) != base:
+                    return "error"
+            except Exception:
+                pass
+            try:
+                self.page.wait_for_timeout(300)
+            except Exception:
+                time.sleep(0.3)
+        return "timeout"
+
+    def _wait_code_input(self, timeout: float = 12.0):
+        """等验证码输入框渲染出来。
+
+        二次验证页是 React 单页应用（源码里是 React.createElement 建出来的），
+        页面加载完 ≠ 表单已经画好。看一眼就断言"认不出来"会误判，
+        所以这里等一会儿，边等边试。
+        """
+        end = time.time() + timeout
+        while True:
+            loc = self._find_code_input()
+            if loc is not None:
+                return loc
+            if time.time() >= end:
+                return None
+            try:
+                self.page.wait_for_timeout(250)
+            except Exception:
+                time.sleep(0.25)
+
+    def _solve_second_factor_here(self, step, ask, human_timeout: float):
+        """**不打开浏览器窗口**完成二次验证。
+
+        做法：程序在（后台的）页面上找到验证码输入框和提交按钮，通过主窗口
+        向你要验证码，然后替你填进去提交。
+
+        页面结构取自学校二次验证前端的真实源码（doubleAuth.bundle.js）：
+            <input name="vericode" id="vericode" maxlength="6" inputmode="numeric">
+            <button type="submit">确认</button>
+            <a class="text-muted">…重新发送…</a>       ← 带倒计时
+
+        返回 True 表示过了；返回 None 表示这个页面程序认不出来（交给上层
+        去问用户要不要改开浏览器窗口）。
+        """
+        if not self.is_alive():
+            self.revive(visible=False)
+        step("检测到二次验证，正在识别验证页面…")
+
+        # ---- 第一步：可能有「选择验证方式」页 ----
+        # 必须先等它渲染出来（React 单页应用是异步画的），否则会误判成认不出来。
+        if self._wait_method_page(timeout=12.0):
+            res = self._solve_method_selection(step, ask, human_timeout)
+            if res == "cancel":
+                raise LoginCancelled("已取消登录。")
+            if res == "visible":
+                return None
+            if res == "sent":
+                # 万一点完没出现验证码输入框（比如短信没登记成功），
+                # 换成另一种方式再试一次
+                if self._wait_code_input(timeout=12.0) is None:
+                    self.log("点了确定但没出现验证码输入框，换一种验证方式重试…",
+                             "WARN")
+                    alt = self._try_other_method(step)
+                    if alt:
+                        step("已改用另一种方式重新发送，请查收。", human=True)
+
+        box = self._wait_code_input(timeout=15.0)
+        if box is None:
+            self._tr("二次验证页认不出验证码输入框")
+            return None
+        # 提交按钮也可能晚一点才渲染出来
+        submit = None
+        end = time.time() + 6.0
+        while submit is None and time.time() < end:
+            submit = self._find_submit_button()
+            if submit is None:
+                try:
+                    self.page.wait_for_timeout(250)
+                except Exception:
+                    time.sleep(0.25)
+        if submit is None:
+            self._tr("二次验证页认不出提交按钮")
+            return None
+
+        for attempt in range(3):
+            step("请在程序窗口里输入收到的验证码。", human=True)
+            answer = ask("请输入收到的 6 位验证码（学校发的短信/微信验证码 3 分钟内有效）。",
+                         image=self._captcha_image(),
+                         allow_resend=self._find_resend_control() is not None,
+                         allow_visible=True,
+                         timeout=human_timeout)
+            if answer is None:
+                raise LoginCancelled("已取消登录。")
+            if answer == HUMAN_VISIBLE:
+                return None
+            if answer == HUMAN_RESEND:
+                resend = self._find_resend_control()
+                if resend is not None:
+                    try:
+                        self.actor.click(self.page, resend)
+                        self.page.wait_for_timeout(1500)
+                        step("已重新发送验证码，请查收。", human=True)
+                    except Exception as e:
+                        self.log(f"重新发送验证码没成功：{e}", "WARN")
+                continue
+
+            try:
+                filled = self._fill_code(box, answer)
+                self._tr(f"验证码已键入（回读一致={filled}）")
+                if not filled:
+                    self.log("验证码没能正确敲进输入框，重新来一次。", "WARN")
+                    step("刚才没输进去，请再输一次。", human=True)
+                    continue
+                before = self._page_hint(160)
+                self.actor.click(self.page, submit)      # 真实鼠标点击
+                if not self._confirm_seems_submitted(before, box):
+                    # 点了没反应 → 用 Playwright 原生点击补一次（同样是真实事件，
+                    # 只是会等元素可点、并且点得更准）
+                    self.log("第一次点「确定」似乎没生效，补一次原生点击。", "WARN")
+                    try:
+                        submit.click(timeout=8000)
+                    except Exception as e:
+                        self.log(f"补点击也失败：{e}", "WARN")
+                    self._confirm_seems_submitted(before, box, timeout=5.0)
+            except Exception as e:
+                self.log(f"提交验证码失败：{e}", "WARN")
+                return None
+
+            outcome = self._wait_landing_or_error(25.0)
+            if outcome == "ok":
+                step("✅ 验证通过。")
+                return True
+            if outcome == "trust":
+                # 验证码对了，学校在问"要不要把本设备登记为信任设备"。
+                self._did_2fa = True
+                if self._solve_trust_step(step, ask, human_timeout):
+                    # 记完之后学校会 redirect2Jsp → 选课系统。
+                    # 但**别只靠页面文案判断**（实测这里有误判），
+                    # 直接去确认一次会话是不是真的好了。
+                    if self._wait_landing(20, on_progress=None) == "ok":
+                        step("✅ 二次验证通过，已进入选课系统。")
+                        return True
+                    step("正在确认登录状态…", human=True)
+                    if self.is_logged_in():
+                        step("✅ 二次验证通过（会话已建立）。")
+                        return True
+                    self.log("记完信任后会话仍未建立，交给上层重试。", "WARN")
+                return None
+            if outcome == "error":
+                # 把服务端的原话告诉你 —— 尤其是"已失效"，那要重发而不是重输
+                hint = self._page_hint(160)
+                self.log(f"服务端提示：{hint}", "WARN")
+                expired = any(k in hint for k in ("失效", "过期", "重新发送"))
+                if expired:
+                    step("验证码已失效（学校发的码只有 3 分钟有效）。"
+                         "请点「重新发送验证码」再试。", human=True)
+                else:
+                    step(f"没通过：{hint}", human=True)
+            else:
+                step("验证码好像不对，请再输一次。", human=True)
+            # 失败后页面可能重绘，重新找一次输入框
+            box = self._wait_code_input(timeout=6.0) or box
+            submit = self._find_submit_button() or submit
+        raise PageError("二次验证连续 3 次没通过，请稍后在浏览器窗口里完成。")
+
+    def _captcha_visible(self) -> bool:
+        """SSO 的图形验证码**是不是真的要求填**。
+
+        实测（2026-09-14 抓的真实页面）：页面上**永远**有这一段
+
+            <div id="c_code" class="form-group hidden">
+              <input type="text" id="i_code" placeholder="图形验证码" name="i_captcha">
+              <img id="captcha" width="60" height="45" src="/captcha.jpg?t=...">
+            </div>
+
+        平时靠 class="hidden" 藏着，只有服务器要求时才由 JS 去掉。页面自己的
+        doLogin() 也是这么判断的：`if (!$("#c_code").hasClass("hidden")) {...}`。
+
+        ⚠ 所以**绝对不能**用「HTML 里有没有『验证码』字样」来判断 —— 那段永远在，
+        那样会永远判成需要验证码，让用户去输一个根本没显示、也没发过来的码。
+        （这正是之前"没收到验证码"的原因。）
+        """
+        try:
+            box = self.page.locator("#c_code").first
+            if box.count():
+                cls = (box.get_attribute("class") or "")
+                if "hidden" in cls.split():
+                    return False
+        except Exception:
+            pass
+        # 兜底：只认"真的看得见"的输入框或图片
+        for sel in ("#i_code", "#c_code input", "img#captcha"):
+            if self._visible_locator(sel) is not None:
+                return True
+        return False
+
+    def _refresh_captcha(self):
+        """换一张图形验证码（点图片，页面自带 onclick="refreshCaptcha()"）。"""
+        for sel in ("img#captcha", "#c_code img"):
+            try:
+                loc = self.page.locator(sel).first
+                if loc.count():
+                    loc.click(timeout=3000)
+                    self.page.wait_for_timeout(800)
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _safe_body_text(self, limit: int = 500) -> str:
         try:
@@ -429,12 +1560,23 @@ class ScholarBrowser:
     def _navigate(self, m: str, *, force_check: bool = False, pause_range=(0.25, 0.7),
                   **params):
         """在浏览器里打开一个子系统页面（真实导航 + 真人的短暂停顿）。"""
+        self._ensure_alive("navigate")
         key = (m, tuple(sorted((k, str(v)) for k, v in params.items())))
         if not force_check and self._loaded == key:
             return self.page
         url = self._url(m, **params)
         self._tr(f"navigate {url}")
-        self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        try:
+            self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            # 窗口正好在这一瞬间被用户关掉：上面的 _ensure_alive 检查过了也没用，
+            # 因为关闭发生在那之后。重开一次再来。
+            if not self._looks_closed(e):
+                raise
+            self.log("导航过程中浏览器窗口被关闭，重新打开后重试本次导航…", "WARN")
+            if not self.revive():
+                raise
+            self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         self._loaded = key
         if pause_range:
             self.actor.ui_pause(*pause_range)
@@ -461,6 +1603,7 @@ class ScholarBrowser:
 
         返回 (当前学期值, [(值, 显示名), …])；读不到就返回 ("", [])。
         """
+        self._ensure_alive("read_semesters")
         try:
             self.page.goto(BASE + "xkBks.vxkBksXkbBs.do?m=showTree",
                            wait_until="domcontentloaded", timeout=30000)
@@ -484,6 +1627,7 @@ class ScholarBrowser:
     # ------------------------------------------------------------------
     def read_phase_text(self) -> str:
         """一级选课页顶部的「当前选课阶段：…」。"""
+        self._ensure_alive("read_phase_text")
         try:
             self.page.goto(BASE + f"xkBks.vxkBksXkbBs.do?m=selectKc&p_xnxq={self.xnxq}",
                            wait_until="domcontentloaded", timeout=45000)
@@ -506,8 +1650,10 @@ class ScholarBrowser:
         kch 是纯数字，可以安全地放进 URL；kcm 含中文，走页面搜索框更稳妥。
         """
         info = COURSE_KINDS[kind]
+        self._ensure_alive("read_capacity_rows")
         if navigate:
-            self._navigate(info["search"], tokenPriFlag=kind, p_kch=kch, p_kxh=kxh)
+            self._navigate(info["search"], tokenPriFlag=kind, p_kch=kch, p_kxh=kxh,
+                           **info.get("extra", {}))
             self.current_list = {"kind": kind, "kch": kch}
         rows = self._parse_grid()
         if rows:
@@ -646,6 +1792,49 @@ class ScholarBrowser:
             pass
         return out
 
+    def _grid_signature(self) -> str:
+        """表格内容指纹，用来判断"查询结果刷新了没有"。
+
+        注意各类别页面渲染方式不同（实测）：
+          * 体育 / 任选：数据在 JS 数组 gridData 里，DOM 里**没有** tr.trr2
+          * 必修 / 限选：反过来，DOM 里有 tr.trr2，gridData 不存在
+        所以两种都要看，只盯一个会永远读不到"变了没有"。
+        """
+        try:
+            return str(self.page.evaluate(r"""() => {
+              const dom = Array.from(document.querySelectorAll('table#table_t tr.trr2'))
+                .slice(0, 4)
+                .map(tr => Array.from(tr.querySelectorAll('td')).slice(0, 4)
+                  .map(td => (td.innerText || '').trim()).join(',')).join('|');
+              const g = (typeof gridData === 'undefined' || !gridData) ? ''
+                : gridData.slice(0, 4)
+                    .map(r => String(r[1]) + ',' + String(r[2]) + ',' + String(r[3]))
+                    .join('|');
+              return dom + '##' + g;
+            }"""))
+        except Exception:
+            return ""
+
+    def _wait_grid_changed(self, before: str, timeout: float = 3.5) -> bool:
+        """等表格内容真的变过来（查询结果是 POST 回来的，要等）。
+
+        不等的话会读到**上一次**的结果 —— 实测：查必修课 30120163 却拿到默认
+        列表里 14 行无关课程，而稍后再读就是正确的。
+
+        超时给得比较短（3.5 秒）：有些页面上的「查询」按钮 onclick 指向的函数
+        根本没定义，点了毫无反应，死等只会白拖时间。真查询实测 2 秒内就回来了。
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                self.page.wait_for_timeout(200)
+            except Exception:
+                time.sleep(0.2)
+            now = self._grid_signature()
+            if now and now != before:
+                return True
+        return False
+
     def search_course_human(self, kind: str, keyword: str, *, by_kch: bool = False
                             ) -> list[CapacityRow]:
         """用页面自带的搜索框查询（真人打字 + 点「查询」）。
@@ -654,9 +1843,11 @@ class ScholarBrowser:
         浏览器会用页面自身的编码提交 POST，服务端才认。
         任选课尤其明显 —— 不搜索的话永远是「没有记录」。
         """
+        self._ensure_alive("search_course_human")
         a = self.actor
         info = COURSE_KINDS[kind]
-        self._navigate(info["search"], tokenPriFlag=kind, pause_range=(0.3, 0.9))
+        self._navigate(info["search"], tokenPriFlag=kind, pause_range=(0.3, 0.9),
+                       **info.get("extra", {}))
         field = "p_kch" if by_kch else "p_kcm"
         box = self.page.locator(f"input[name='{field}']").first
         if box.count() == 0:
@@ -667,8 +1858,12 @@ class ScholarBrowser:
         a.type_text(self.page, box, keyword)
         a.ui_pause(0.2, 0.6)
         btn = self.page.locator("input[value='查询']").first
+        before = self._grid_signature()
         a.click(self.page, btn)
-        a.ui_pause(0.6, 1.4)
+        # 关键：等结果真的刷新，否则读回来的是上一次的表格
+        if not self._wait_grid_changed(before):
+            self.log("查询结果似乎没有刷新，再等一会儿…", "WARN")
+            a.ui_pause(0.8, 1.4)
         self._loaded = None          # 查询是表单提交，页面状态已变
         self.current_list = {"kind": kind, "kch": keyword if by_kch else ""}
         rows = self._parse_grid() or self._parse_table()
@@ -679,6 +1874,7 @@ class ScholarBrowser:
     # 读：已选定课程
     # ------------------------------------------------------------------
     def read_selected(self, *, navigate: bool = True) -> list[SelectedCourse]:
+        self._ensure_alive("read_selected")
         if navigate:
             self._navigate("yxSearchTab", tokenPriFlag="yx")
         out: list[SelectedCourse] = []
@@ -711,16 +1907,26 @@ class ScholarBrowser:
 
         如果当前页面已经是筛选好的选课页，就不再重新导航（省一次加载）。
         """
+        self._ensure_alive("submit_selection")
         a = self.actor
         info = COURSE_KINDS[kind]
         try:
             self._navigate(info["search"], tokenPriFlag=kind, p_kch=kch,
                            force_check=not self._has_cid(info["field"], cid),
-                           pause_range=(0.2, 0.6))
+                           pause_range=(0.2, 0.6), **info.get("extra", {}))
         except SessionExpired:
             raise
-        if not self._has_cid(info["field"], cid):
-            raise PageError(f"页面上找不到课程 {cid}（可能已调整或已选满下架）")
+        if not self._wait_cid(info["field"], cid):
+            # URL 参数在必修/限选/任选上是无效的，打开的是默认列表；
+            # 目标课不在里面时，用搜索框把它找出来再试一次。
+            if kch:
+                self.log(f"列表里没找到 {cid}，改用搜索框找…", "WARN")
+                try:
+                    self.search_course_human(kind, kch, by_kch=True)
+                except Exception as e:
+                    self.log(f"搜索失败：{e}", "WARN")
+            if not self._wait_cid(info["field"], cid):
+                raise PageError(f"页面上找不到课程 {cid}（可能已调整或已选满下架）")
 
         old = a.tempo
         if urgent:
@@ -747,10 +1953,12 @@ class ScholarBrowser:
 
     def drop_course(self, del_id: str, *, urgent: bool = False) -> str:
         """在「已选定课程」里勾选并点「删除」。"""
+        self._ensure_alive("drop_course")
         a = self.actor
         self._navigate("yxSearchTab", tokenPriFlag="yx", pause_range=(0.2, 0.6))
         radio = self.page.locator(f"input[name='p_del_id'][value='{del_id}']").first
-        if radio.count() == 0:
+        # 同样要等渲染：表格是 JS 画出来的
+        if not self._wait_selector(f"input[name='p_del_id'][value='{del_id}']"):
             raise PageError(f"选课记录里没有 {del_id}")
 
         old = a.tempo
@@ -779,6 +1987,39 @@ class ScholarBrowser:
             return self.page.locator(f"input[name='{field}'][value='{cid}']").count() > 0
         except Exception:
             return False
+
+    def _wait_selector(self, selector: str, timeout: float = 7.0) -> bool:
+        """等某个选择器出现（同样是给 JS 渲染留时间）。"""
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                if self.page.locator(selector).count() > 0:
+                    return True
+            except Exception:
+                pass
+            try:
+                self.page.wait_for_timeout(200)
+            except Exception:
+                time.sleep(0.2)
+        return False
+
+    def _wait_cid(self, field: str, cid: str, timeout: float = 7.0) -> bool:
+        """等那一行真的渲染出来。
+
+        ⚠ 这一步是必须的：课程列表是 JS 渲染的，导航返回 ≠ 表格已经画好。
+        实测（真退真选测试）：刚导航完立刻找 checkbox 会找不到，程序于是报
+        「页面上找不到课程」而放弃；2 秒后再找就有了。抢课的时候这就是
+        **白白错过一次机会**。
+        """
+        end = time.time() + timeout
+        while time.time() < end:
+            if self._has_cid(field, cid):
+                return True
+            try:
+                self.page.wait_for_timeout(200)
+            except Exception:
+                time.sleep(0.2)
+        return False
 
     def read_result_message(self) -> str:
         """抓页面上的业务提示（showMsg(...) 或正文里的提示句）。"""

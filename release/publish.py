@@ -13,13 +13,13 @@ from pathlib import Path
 import httpx
 
 REPO = "Tambacy/xk"
-TAG = "v0.1.0"
-NAME = "v0.1.0 第一版"
+TAG = "v0.2.0"
+NAME = "v0.2.0 二次验证走通了 + 抢课安全护栏"
 ROOT = Path(r"E:\Test_Project")
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
-    ROOT / "release" / "XkHelper-v0.1.0-source.zip",
-    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.1.0.exe",
+    ROOT / "release" / "XkHelper-v0.2.0-source.zip",
+    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.2.0.exe",
 ]
 
 
@@ -41,7 +41,7 @@ def get_token() -> str | None:
 
 def main():
     print("=" * 66)
-    print("发布 v0.1.0")
+    print(f"发布 {TAG}")
     print("=" * 66)
 
     token = get_token()

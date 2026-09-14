@@ -152,26 +152,38 @@ def _match(row: CapacityRow, q: CourseQuery) -> bool:
 
 
 def fetch_candidates(browser: ScholarBrowser, q: CourseQuery) -> list[CapacityRow]:
-    """把该课程种类下可能相关的行都取回来。"""
-    # 快路径：体育课页认 URL 里的课程号，一次加载 0.6 秒
+    """把该课程种类下可能相关的行都取回来。
+
+    实测结论（2026-09-14，对着真实页面量过）：
+      * 体育课页认 URL 里的课程号，会把数据直接筛成目标课那几行 —— 快路径
+      * 必修 / 限选 / 任选**不认** URL 参数，但返回的是「默认候选列表」；
+        实测必修课的默认列表里就包含目标课的 4 个课堂，所以在列表里找目标课
+        才是对的（以前写的"非体育课一律走搜索框"会拿回 14 行无关课程）
+      * 页面上的「查询」按钮 onclick 指向的函数在某些页面上根本没定义
+        （点了毫无反应），所以只能当兜底手段
+    """
+    # 快路径：体育课页认 URL 里的课程号，一次加载约 0.3 秒
     if q.kind == "ty" and q.kch:
         return browser.read_capacity_rows("ty", kch=q.kch)
 
-    # 如果当前页面上正好摆着这一类课程、且筛的就是这个课程号，直接复用
-    if q.kch and browser.is_on_list_page(q.kind, q.kch):
-        try:
-            rows = browser.read_capacity_rows(q.kind, kch=q.kch, navigate=False)
-        except Exception:
-            rows = []
-        if rows and any(r.kch == q.kch for r in rows):
-            return rows
+    # 只给了课程名：没法靠列表定位，必须走搜索框
+    if not q.kch:
+        if not q.name:
+            raise PageError("至少需要课程号或课程名才能搜索")
+        return browser.search_course_human(q.kind, q.name, by_kch=False)
 
-    # 走页面搜索：有课程号用课程号，否则用课程名
-    # （中文必须走页面表单，浏览器会用页面自身的 GBK 编码提交，服务端才认）
-    keyword = q.kch or q.name
-    if not keyword:
-        raise PageError("至少需要课程号或课程名才能搜索")
-    return browser.search_course_human(q.kind, keyword, by_kch=bool(q.kch))
+    rows = browser.read_capacity_rows(q.kind)
+    if any(r.kch == q.kch for r in rows):
+        return rows
+
+    # 默认列表里没有 → 再试搜索框
+    try:
+        found = browser.search_course_human(q.kind, q.kch, by_kch=True)
+        if found:
+            return found
+    except Exception:
+        pass
+    return rows
 
 
 def resolve(browser: ScholarBrowser, q: CourseQuery) -> ResolveResult:

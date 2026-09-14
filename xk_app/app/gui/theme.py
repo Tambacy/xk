@@ -60,6 +60,14 @@ QLabel#Error     {{ color: {C['danger']}; font-size: 13px; }}
 QLabel#Success   {{ color: {C['accent']}; font-size: 13px; }}
 QLabel#Warn      {{ color: {C['warn']}; font-size: 13px; }}
 
+/* 需要你本人操作（验证码 / 二次认证）的提示块 */
+QFrame#HumanBox {{
+    background: #FDF6EC;
+    border: 1px solid {C['warn']};
+    border-left: 4px solid {C['warn']};
+    border-radius: 8px;
+}}
+
 /* ---------- 按钮 ---------- */
 QPushButton {{
     background: {C['card']};
