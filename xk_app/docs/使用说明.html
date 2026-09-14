@@ -1,0 +1,356 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>学校选课助手 · 使用说明</title>
+<style>
+  :root{
+    --purple:#7B2D8E; --purple-dark:#5E1F6E; --purple-light:#F3E9F7;
+    --text:#23262B; --dim:#6B7280; --faint:#9AA1AC;
+    --border:#E3E5E9; --bg:#F5F6F8; --card:#fff;
+    --green:#2E9E6B; --warn:#D9822B; --red:#C0392B;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    font-size:15px; line-height:1.75;
+  }
+  .wrap{max-width:900px; margin:0 auto; padding:32px 24px 80px}
+  header{
+    background:linear-gradient(135deg,var(--purple),var(--purple-dark));
+    color:#fff; padding:36px 24px; margin:-32px -24px 28px; border-radius:0 0 18px 18px;
+  }
+  header h1{margin:0 0 6px; font-size:27px}
+  header p{margin:0; opacity:.88; font-size:14px}
+  h2{
+    font-size:19px; margin:34px 0 12px; padding-left:12px;
+    border-left:4px solid var(--purple); line-height:1.3;
+  }
+  h3{font-size:16px; margin:22px 0 8px; color:var(--purple-dark)}
+  p,li{color:var(--text)}
+  small{color:var(--dim)}
+  .card{
+    background:var(--card); border:1px solid var(--border);
+    border-radius:12px; padding:18px 20px; margin:14px 0;
+  }
+  .tip{border-left:4px solid var(--green); background:#F2FBF6}
+  .warn{border-left:4px solid var(--warn); background:#FFF9F1}
+  .danger{border-left:4px solid var(--red); background:#FDF3F2}
+  .info{border-left:4px solid var(--purple); background:var(--purple-light)}
+  table{border-collapse:collapse; width:100%; margin:12px 0; font-size:14px}
+  th,td{border:1px solid var(--border); padding:9px 12px; text-align:left; vertical-align:top}
+  th{background:#FAFAFC; font-weight:600}
+  code{
+    background:#F1F2F5; padding:1px 6px; border-radius:5px;
+    font-family:"Cascadia Mono",Consolas,monospace; font-size:13px;
+  }
+  pre{
+    background:#1E2128; color:#D6DAE1; padding:14px 16px; border-radius:10px;
+    overflow-x:auto; font-family:"Cascadia Mono",Consolas,monospace; font-size:13px; line-height:1.6;
+  }
+  ol,ul{padding-left:22px}
+  li{margin:5px 0}
+  .step{display:flex; gap:12px; align-items:flex-start; margin:12px 0}
+  .num{
+    flex:0 0 26px; height:26px; border-radius:50%; background:var(--purple); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:600;
+    margin-top:3px;
+  }
+  .badge{
+    display:inline-block; background:var(--purple-light); color:var(--purple);
+    padding:2px 10px; border-radius:10px; font-size:12.5px; margin-right:6px;
+  }
+  .toc{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 22px}
+  .toc ol{margin:6px 0}
+  .toc a{color:var(--purple); text-decoration:none}
+  .toc a:hover{text-decoration:underline}
+  footer{margin-top:50px; padding-top:18px; border-top:1px solid var(--border); color:var(--faint); font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>学校选课助手</h1>
+  <p>自动盯课余量、按预定时间抢课 —— 全程用真实浏览器操作，不做任何脚本化请求</p>
+</header>
+
+<div class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#what">它能做什么</a></li>
+    <li><a href="#install">安装与卸载</a></li>
+    <li><a href="#login">第一步：登录</a></li>
+    <li><a href="#mode">第二步：选择运行模式</a></li>
+    <li><a href="#courses">第三步：预定课程</a></li>
+    <li><a href="#run">第四步：确认并启动</a></li>
+    <li><a href="#during">运行期间要注意什么</a></li>
+    <li><a href="#privacy">隐私与安全</a></li>
+    <li><a href="#detect">会被服务器认出是脚本吗</a></li>
+    <li><a href="#problem">出问题了怎么办</a></li>
+    <li><a href="#faq">常见问题</a></li>
+  </ol>
+</div>
+
+<h2 id="what">1. 它能做什么</h2>
+
+<p>按你设定的节奏反复检查目标课程有没有课余量，一旦发现就（必要时先退掉占位的课）立刻提交选课。它<b>不</b>替你决定选什么课，也<b>不</b>能提高中签率 —— 它解决的是"别人退课的那一瞬间我不在电脑前"这个问题。</p>
+
+<table>
+  <tr><th>能做</th><th>不能做</th></tr>
+  <tr>
+    <td>
+      · 按时间点自动开始选课<br>
+      · 长期监听课余量，发现就抢<br>
+      · 抢之前自动退掉冲突/让位的课<br>
+      · 抢不到自动把退掉的课选回来<br>
+      · 会话过期自动重新登录
+    </td>
+    <td>
+      · 报名/抽签阶段插队（那个阶段本来就不是先到先得）<br>
+      · 绕过系统的任何限制<br>
+      · 在程序关着的时候帮你盯着
+    </td>
+  </tr>
+</table>
+
+<div class="card info">
+  <b>它是怎么"操作"的？</b><br>
+  程序内置一个真实的 Chromium 浏览器，所有动作 —— 登录打密码、点页签、填课程名、勾选课程、点提交 —— 都是在这个浏览器里<b>像人一样真实点击和输入</b>的，不发送任何脚本化的后台请求。轮询的间隔也是随机浮动的，不是固定节拍。
+</div>
+
+<h2 id="install">2. 安装与卸载</h2>
+
+<div class="step"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.1.0.exe</code>，一路下一步。</div></div>
+<div class="step"><div class="num">2</div><div>装完会自动创建开始菜单和桌面快捷方式。</div></div>
+
+<p><small>安装目录约 650 MB —— 里面有一整个 Chromium，所以比较大。默认装在 <code>%LOCALAPPDATA%\Programs\XkHelper</code>，不需要管理员权限。</small></p>
+
+<p><b>卸载</b>：从开始菜单或「设置 → 应用」里卸载即可。</p>
+
+<div class="card warn">
+  <b>卸载不会删除你的账号密码和日志。</b>它们单独放在 <code>%LOCALAPPDATA%\XkHelper</code>。
+  要彻底清理，先卸载，再手动删掉那个文件夹。
+</div>
+
+<h2 id="login">3. 第一步：登录</h2>
+
+<p>使用学校统一身份认证的学号和密码，就是你在 info.tsinghua.edu.cn 用的那套。</p>
+
+<div class="card tip">
+  <b>建议勾上「信任此浏览器」</b> —— 登录会话过期后可以免密码自动重登，不用你管。
+</div>
+
+<h3>「记住密码」是怎么保存的</h3>
+<p>用 Windows 自带的 DPAPI 加密后存在本机，密钥由系统按<b>当前用户 + 当前电脑</b>派生：</p>
+<ul>
+  <li>换个 Windows 账户登录同一台电脑 → 解不开</li>
+  <li>把文件拷到别的电脑 → 解不开</li>
+  <li>全程明文不落盘；日志里的密码、学号、Cookie 都会被自动打码成 <code>***</code></li>
+</ul>
+<p>不想保存就别勾，每次手动输。已经保存过的，点登录页底部的 <b>「清除本机已保存的账号密码」</b>，会连同浏览器登录态一起清掉。</p>
+
+<h2 id="mode">4. 第二步：选择运行模式</h2>
+
+<p><b>看你现在处在哪个阶段，对号入座：</b></p>
+
+<table>
+  <tr><th>你的情况</th><th>选哪个</th><th>它会做什么</th></tr>
+  <tr>
+    <td>选课还没开始<br><small>（现在投了也要等抽签）</small></td>
+    <td><span class="badge">模式一</span></td>
+    <td>填学校通知里的开始时间。程序提前开始盯「当前选课阶段」，一变成正选/补退选（先到先得）就自动选课</td>
+  </tr>
+  <tr>
+    <td>选课马上开始<br>而且手上有课要让位</td>
+    <td><span class="badge">模式二</span></td>
+    <td>填开始时间 + 要退的课。到点先退课再抢；抢不到自动把退掉的课选回来</td>
+  </tr>
+  <tr>
+    <td>选课进行中<br>目标课没余量，想蹲别人退课</td>
+    <td><span class="badge">模式三</span></td>
+    <td>长期后台监听，可设平均间隔（最长 1 小时）。发现余量立刻抢</td>
+  </tr>
+</table>
+
+<div class="card info">
+  <b>三种模式的"拟人化"程度不一样，这是故意的：</b><br>
+  · 模式一/三 —— 慢节奏，间隔随机长尾、偶尔拉长、夜间静默，重点是不像机器<br>
+  · 模式二 —— 等待期间拟人化，<b>动手那一瞬间全速</b>
+</div>
+
+<h2 id="courses">5. 第三步：预定课程</h2>
+
+<p>左边填课程信息，填够能<b>唯一定位到一门课</b>就行，不用全填。</p>
+
+<table>
+  <tr><th>字段</th><th>说明</th></tr>
+  <tr><td>用途</td><td>「要抢的课」或「要退的课」。退的课会去你的已选列表里找，不用去课程库里搜</td></tr>
+  <tr><td>课程种类</td><td>必修课 / 限选课 / 任选课 / 体育课 / 重修课</td></tr>
+  <tr><td>课程名</td><td><b>最常用的一项</b>，可以只填它</td></tr>
+  <tr><td>任课教师</td><td>选填，用来在多个课堂里区分</td></tr>
+  <tr><td>上课时间</td><td>选填，格式 <code>4-1</code> 表示星期四第 1 大节</td></tr>
+  <tr><td>课程号 / 课序号</td><td>选填，有的话定位最准也最快</td></tr>
+</table>
+
+<p>点「添加到清单」后，程序会<b>自动去教务系统查证</b>：</p>
+<ul>
+  <li>✅ <b>已定位</b> —— 找到了，右侧卡片显示课程号、课序号、上课时间、任课教师、当前课余量</li>
+  <li>⚠️ <b>需补充</b> —— 同名课程有多个课堂，它会告诉你分别是什么时间，让你补课序号或上课时间</li>
+  <li>⚠️ <b>时间冲突</b> —— 和已选课程撞时间，卡片会标红并写明和哪门课冲突</li>
+  <li>❌ <b>未找到</b> —— 课程号/课程名可能有误，或本学期没开这门课</li>
+</ul>
+
+<h3>运行设置</h3>
+<table>
+  <tr><th>项</th><th>说明</th></tr>
+  <tr><td>开始选课时间</td><td>模式一/二必填，填学校通知里的时间</td></tr>
+  <tr><td>提前盯梢</td><td>比开始时间早多少秒开始盯着，默认 60 秒</td></tr>
+  <tr><td>平均监听间隔</td><td>多久查一次。模式三可以设很大，比如 <code>3600</code> 秒 = 1 小时查一次</td></tr>
+  <tr><td>学期</td><td><b>登录后自动识别</b>，也能手动切到别的学期</td></tr>
+  <tr><td>夜间静默</td><td>01:00~06:00 完全不发请求（这个时段基本没人退课，还省得留痕迹）</td></tr>
+  <tr><td>试运行</td><td>勾上就只监听、不真的提交。想先观察几天就勾它</td></tr>
+</table>
+
+<div class="card tip">
+  清单里所有「要抢的课」都校验通过后，「下一步」才会亮起。
+</div>
+
+<h2 id="run">6. 第四步：确认并启动</h2>
+
+<p>确认页会告诉你：<b>将在什么时间开始监听</b>、要抢哪些课、要不要先退课、夜间静默开没开。</p>
+
+<div class="card danger">
+  <b>点「开始运行」之后：</b>
+  <ol style="margin:8px 0 0">
+    <li><b>不要关闭本程序</b> —— 关了就等于停止抢课。可以最小化。</li>
+    <li><b>不要手动关掉它打开的浏览器</b>（如果选了可见窗口）。</li>
+    <li><b>别让电脑睡眠</b> —— 合盖、休眠都会让监听暂停。建议接上电源。</li>
+  </ol>
+</div>
+
+<h2 id="during">7. 运行期间要注意什么</h2>
+
+<h3>监控页看什么</h3>
+<ul>
+  <li><b>状态灯</b>：准备中 / 等待开始 / 监听中 / 正在抢课 / 已完成</li>
+  <li><b>四个统计</b>：已轮询次数、距下次检查、已运行时长、已抢到几门</li>
+  <li><b>目标课程</b>：每门课当前的实时课余量</li>
+  <li><b>运行日志</b>：每一次检查、每一次决定都有记录</li>
+</ul>
+
+<h3>它会自己处理的事（不用你管）</h3>
+<ul>
+  <li><b>登录过期</b> —— 自动重新登录，约几秒钟，轮询不中断</li>
+  <li><b>抢课中途掉线</b> —— 先重登再继续，不会半途而废</li>
+  <li><b>抢不到</b> —— 如果为了抢它退了别的课，会自动把退掉的课选回来</li>
+  <li><b>选课阶段还没开放</b> —— 会一直等到开放为止</li>
+</ul>
+
+<h3>抢到之后</h3>
+<p>会响铃、写日志。默认继续留着低频确认；也可以在确认页设置成抢到就自动退出。</p>
+
+<h2 id="privacy">8. 隐私与安全</h2>
+
+<table>
+  <tr><th>项目</th><th>怎么保护的</th></tr>
+  <tr><td>账号密码</td><td>Windows DPAPI 加密存储，绑定当前用户 + 当前电脑；明文不落盘</td></tr>
+  <tr><td>日志</td><td>密码、学号、Cookie、密文都自动打码成 <code>***</code>，写进日志前就替换掉了</td></tr>
+  <tr><td>诊断包</td><td>导出时自动脱敏，不含账号密码。可以放心发给别人帮你看</td></tr>
+  <tr><td>网络</td><td>只和学校的选课系统通信，不向任何第三方发送数据</td></tr>
+</table>
+
+<p>程序的数据都在 <code>%LOCALAPPDATA%\XkHelper\</code>：</p>
+<pre>config.json          设置（不含账号密码）
+credentials.dat      账号密码（DPAPI 加密）
+logs\                运行日志
+browser_profile\     浏览器登录态
+diagnostics\         导出的诊断包</pre>
+
+<h2 id="detect">8.5 会被服务器认出是脚本吗</h2>
+
+<p>分三层来看，从"看得见"到"藏不住"：</p>
+
+<h3>第一层：浏览器指纹 —— 已经处理干净</h3>
+<p>程序用的是<b>真实 Chromium 浏览器</b>，不是脚本模拟的 HTTP 请求。实测审计结果：</p>
+<table>
+  <tr><th>检测点</th><th>普通脚本</th><th>本程序</th></tr>
+  <tr><td>TLS 指纹</td><td>Python 库的指纹，一眼假</td><td>真 Chromium 的指纹</td></tr>
+  <tr><td>请求头</td><td>缺 sec-ch-ua 等一整套</td><td>浏览器原生发什么就是什么</td></tr>
+  <tr><td><code>navigator.webdriver</code></td><td><code>true</code></td><td>已抹除</td></tr>
+  <tr><td>插件列表 / <code>window.chrome</code></td><td>空 / 缺失</td><td>正常</td></tr>
+  <tr><td>WebGL 渲染器</td><td>无</td><td>真实显卡</td></tr>
+  <tr><td>点击事件 <code>isTrusted</code></td><td><code>false</code></td><td><code>true</code>（真实鼠标事件）</td></tr>
+</table>
+
+<div class="card tip">
+  <b>默认使用「可见窗口」模式</b>，因为那一档零破绽 —— 它本来就是一台正常的浏览器，用真显卡在渲染。
+  如果改成无头（后台）模式，程序会自动补一层伪装，但"伪装"终究不如"本来就是"。
+</div>
+
+<h3>第二层：行为节奏 —— 已经做过混淆</h3>
+<ul>
+  <li>轮询间隔是<b>随机浮动</b>的，不是固定周期；还带长尾停顿（偶尔"走神"更久）</li>
+  <li>相邻两次间隔不会雷同，取值区间连续（不留下"永远取不到"的空档）</li>
+  <li>鼠标走真实轨迹有弧度，输入是逐字敲的</li>
+  <li>夜间 01:00~06:00 <b>一个请求都不发</b></li>
+</ul>
+
+<h3>第三层：访问日志 —— 这一层藏不住</h3>
+<div class="card warn">
+  <p style="margin-top:0">即使指纹完美，<b>服务器的访问日志里仍然能看到</b>：某个会话每隔一段时间就访问同一个页面，持续几小时甚至几天。</p>
+  <p style="margin-bottom:0">这不是"检测脚本"的技术问题，而是<b>行为模式</b>问题 —— 管理员翻日志时肉眼就能看出来。程序能做的只有：把间隔设长一点、夜里停掉、别 24 小时不间断地跑。</p>
+</div>
+
+<h3>现实评估</h3>
+<p>学校的选课系统是一套老式的教务系统，从实测看<b>没有做任何自动化检测</b> —— 程序在无头模式下带着 <code>HeadlessChrome</code> 的 UA 登录了上百次，从未被拦。所以实际风险很低。</p>
+<p>但请自觉遵守学校规定，不要把它变成"军备竞赛"。合理使用：间隔设正常值、夜间静默打开、抢到就停。</p>
+
+<h2 id="problem">9. 出问题了怎么办</h2>
+
+<div class="step"><div class="num">1</div><div><b>先看日志。</b>监控页右下角有「打开日志」，或直接去 <code>%LOCALAPPDATA%\XkHelper\logs\</code>。每一条都带时间戳。</div></div>
+<div class="step"><div class="num">2</div><div><b>跑一次自检。</b>在安装目录按住 Shift 右键 → 「在此处打开 PowerShell」，然后执行：<pre>.\XkHelper.exe --selftest</pre>它会检查浏览器能不能启动、能不能连上学校网络。结论直接写在屏幕上，同时也进日志。</div></div>
+<div class="step"><div class="num">3</div><div><b>导出诊断包。</b>监控页右上角「导出诊断包」，会打包日志 + 环境信息（已脱敏）。</div></div>
+
+<h3>常见症状</h3>
+<table>
+  <tr><th>症状</th><th>可能原因 / 处理</th></tr>
+  <tr><td>一直卡在「正在登录…」</td><td>网络不通，或密码错了。跑 <code>--selftest</code> 看结论；确认密码能正常登录 info.tsinghua.edu.cn</td></tr>
+  <tr><td>提示「需要图形验证码」</td><td>学校对这次登录加了验证码。程序会打开浏览器窗口，请手动输入一次</td></tr>
+  <tr><td>提示「票据校验失败」</td><td>短时间登录太频繁被风控。等几分钟再试</td></tr>
+  <tr><td>课程校验显示「未找到」</td><td>检查课程号/课程名；也可能这门课本学期没开</td></tr>
+  <tr><td>一直显示「暂无余量」</td><td>正常，就是没人退课。耐心等，或者把间隔调小</td></tr>
+  <tr><td>抢课时提示「只能选一门」</td><td>你已经有一门体育课了。在清单里加一条「要退的课」，把旧的那门填进去</td></tr>
+  <tr><td>窗口显示不全 / 字很小</td><td>窗口可以随意拖大；内容放不下会自动出滚动条，不会错位</td></tr>
+</table>
+
+<h2 id="faq">10. 常见问题</h2>
+
+<h3>会提高中签率吗？</h3>
+<p>不会。抽签阶段由系统按教学计划和志愿等级决定，程序改变不了。它只在<b>先到先得</b>的阶段（正选、补退选）有用 —— 帮你抓住别人退课的那一瞬间。</p>
+
+<h3>能同时抢多门课吗？</h3>
+<p>能。清单里加多少门都行，会依次检查、依次抢。</p>
+
+<h3>间隔设多小合适？</h3>
+<p>默认就行。设太小除了给服务器增加压力、让自己更容易被风控盯上之外，没什么好处 —— 瓶颈是"有没有人退课"，不是"你查得多快"。</p>
+
+<h3>为什么夜间要静默？</h3>
+<p>凌晨 1 点到 6 点基本没人退课，一直发请求没意义，还平白留下行为痕迹。这段时间程序一个请求都不发。</p>
+
+<h3>能关掉它打开的浏览器窗口吗？</h3>
+<p>默认就是后台无窗口运行的，你一般看不到浏览器。如果设置成可见窗口模式，请让它开着。</p>
+
+<h3>换电脑还能用吗？</h3>
+<p>能。安装包是自包含的，拷过去装就行。但账号密码不会跟着走（DPAPI 绑定机器），需要重新登录一次。</p>
+
+<footer>
+  学校选课助手 v0.1.0 · 本说明随安装包一起分发<br>
+  仅供本人选课使用，请遵守学校相关规定
+</footer>
+
+</div>
+</body>
+</html>
