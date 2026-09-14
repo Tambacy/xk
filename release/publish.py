@@ -12,6 +12,14 @@ from pathlib import Path
 
 import httpx
 
+# Windows 控制台默认 GBK，打印 ✅ 之类的字符会直接抛 UnicodeEncodeError
+# （项目里踩过的老坑，main.py / _creds.py 都补过同样的东西）
+for _s in ("stdout", "stderr"):
+    try:
+        getattr(sys, _s).reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 REPO = "Tambacy/xk"
 TAG = "v0.2.0"
 NAME = "v0.2.0 二次验证走通了 + 抢课安全护栏"
