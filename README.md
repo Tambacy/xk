@@ -4,6 +4,18 @@
 登录、点页签、勾选课程、点提交都是像人一样的真实鼠标键盘事件，
 不发送任何脚本化的后台请求。
 
+## 下载
+
+到 [**Releases**](https://github.com/Tambacy/xk/releases) 页面下载：
+
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `XkHelper-Setup-0.1.0.exe` | 334 MB | **安装包**，推荐。自包含，装完即用 |
+| `XkHelper-v0.1.0-source.zip` | 607 KB | 源码，想自己改或自己构建就下这个 |
+
+安装包体积大是因为**内置了一整个 Chromium**（解压后 426 MB）——
+这样程序才能用真实浏览器操作，而不是发脚本化的 HTTP 请求。
+
 ![登录](xk_app/docs/screenshots/1-login.png)
 
 <details>

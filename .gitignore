@@ -58,6 +58,11 @@ build/
 installer/
 *.spec.bak
 
+# 发布产物（已经传到 GitHub Releases，不进仓库）
+release/*.zip
+release/*.exe
+release/*.7z
+
 # 界面渲染截图
 shots/
 
