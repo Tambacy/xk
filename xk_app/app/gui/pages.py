@@ -468,11 +468,16 @@ class ModePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 卡片高度固定、窗口一矮就会被压扁或截断 —— 和登录页一样套滚动区
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(52, 28, 52, 30)
-        outer.setSpacing(30)
-        outer.addWidget(_title("选择运行模式", "根据你现在处在选课的哪个阶段来选",
-                               "步骤 2 / 5"))
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(52, 28, 52, 30)
+        lay.setSpacing(30)
+        lay.addWidget(_title("选择运行模式", "根据你现在处在选课的哪个阶段来选",
+                             "步骤 2 / 5"))
 
 
         self.cards = []
@@ -503,15 +508,22 @@ class ModePage(QWidget):
             c.clicked.connect(self.chosen.emit)
             grid.addWidget(c, 1)
             self.cards.append(c)
-        outer.addLayout(grid)
-        outer.addStretch(1)
+        lay.addLayout(grid)
+        lay.addStretch(1)
 
         bar = QHBoxLayout()
         b = QPushButton("← 返回")
         b.clicked.connect(self.back.emit)
         bar.addWidget(b)
         bar.addStretch(1)
-        outer.addLayout(bar)
+        lay.addLayout(bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
 
 # ==========================================================================
@@ -950,10 +962,15 @@ class ConfirmPage(QWidget):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.cfg = cfg
+        # 两张卡片的文案是动态的（课程多时会长），窗口一矮同样会被截断
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(52, 28, 52, 30)
-        outer.setSpacing(28)
-        outer.addWidget(_title("确认并启动", "点开始后请保持程序运行", "步骤 4 / 5"))
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(52, 28, 52, 30)
+        lay.setSpacing(28)
+        lay.addWidget(_title("确认并启动", "点开始后请保持程序运行", "步骤 4 / 5"))
 
         row = QHBoxLayout()
         row.setSpacing(24)
@@ -963,9 +980,9 @@ class ConfirmPage(QWidget):
 
         self.card_warn = Card("请注意")
         row.addWidget(self.card_warn, 2)
-        outer.addLayout(row)
+        lay.addLayout(row)
 
-        outer.addStretch(1)
+        lay.addStretch(1)
         bar = QHBoxLayout()
         b = QPushButton("← 返回修改")
         b.clicked.connect(self.back.emit)
@@ -975,7 +992,14 @@ class ConfirmPage(QWidget):
         self.btn.setMinimumHeight(44)
         self.btn.clicked.connect(self.start.emit)
         bar.addWidget(self.btn)
-        outer.addLayout(bar)
+        lay.addLayout(bar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
 
 
     def refresh(self, cfg, entries):
@@ -1164,6 +1188,8 @@ class MonitorPage(QWidget):
             "error": C["danger"],
         }
         self.dot.set_color(colors.get(state, C["text_faint"]))
+        # 只有「真的在跑」的状态才让光晕呼吸；静止状态不分散注意力
+        self.dot.set_breathing(state in ("monitoring", "acting"))
         self.lb_state.setText(title)
         if message:
             self.lb_msg.setText(message)

@@ -7,7 +7,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QRect, QPoint
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QStackedWidget, QMessageBox, QLabel, QFrame,
@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 from .core import BrowserCore
 from .pages import LoginPage, ModePage, CoursesPage, ConfirmPage, MonitorPage
 from .theme import stylesheet
+from . import motion
+from .motion import PageCurtain
 from .widgets import HeroBand, LogoMark
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
 from ..browser import COURSE_KINDS
@@ -34,6 +36,7 @@ class MainWindow(QMainWindow):
         self.entries: list[CourseEntry] = self.cfg.courses_as_entries()
         self.results: dict[int, dict] = {}
         self.core: BrowserCore | None = None
+        self.curtain: PageCurtain | None = None
 
         self.setWindowTitle(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
         self.resize(1120, 760)
@@ -48,7 +51,7 @@ class MainWindow(QMainWindow):
 
         # ---- 顶部：深色 Hero 带（玻璃导航胶囊 + 步骤导轨）----
         # 参考站的 nav 是一条浮在深色影像上的玻璃胶囊，不是通栏白条。
-        # 这里给桌面应用补上等价的「深色底」：一块深墨绿渐变面板。
+        # 这里给桌面应用补上等价的「深色底」：一幅程序生成的夜空（见 backdrop.py）。
         # 登录页不显示这条带子 —— 那一页整屏都是深色品牌分栏，见 pages.LoginPage。
         self.band = HeroBand()
         nr = self.band.nav_row
@@ -131,10 +134,22 @@ class MainWindow(QMainWindow):
         self.page_monitor.export_diag.connect(self.on_export_diag)
 
     def goto(self, index: int):
+        changed = self.stack.currentIndex() != index
+        snap, geo = None, None
+        if changed and self.isVisible() and motion.ENABLED:
+            old = self.stack.currentWidget()
+            if old is not None and old.width() > 0 and old.height() > 0:
+                snap = old.grab()
+                geo = QRect(self.stack.mapTo(self.centralWidget(), QPoint(0, 0)),
+                            self.stack.size())
         self.stack.setCurrentIndex(index)
         self.steps.set_current(index)
-        # 登录页整屏是深色品牌分栏，顶上的深色带会让两片深色撞在一起
+        # 登录页整屏是天幕品牌分栏，顶上的天幕条会让两片深色撞在一起
         self.band.setVisible(index != 0)
+        if snap is not None:
+            if self.curtain is None:
+                self.curtain = PageCurtain(self.centralWidget())
+            self.curtain.play(snap, geo)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
             self.page_courses.set_headless(self.cfg.headless)

@@ -1,78 +1,82 @@
 # -*- coding: utf-8 -*-
 """界面主题：设计令牌 + 全局样式表。
 
-视觉语言取自 espaciolanube.com。第一次改版只搬了它的「令牌」（骨白、深墨绿、
-无投影、胶囊），结果是一堆贴在米色底上的白方块 —— 因为参考站的美感**并不**
-来自那些令牌，而来自三件事：
+视觉语言取自 espaciolanube.com，但只保留它的**关系**（深色底 → 玻璃 → 大字），
+配色换成**淡紫**系统。
 
-  1. **满幅的深色影像**：整站的戏剧性全在那张占满首屏的照片上，
-     玻璃导航、白色大字都只是浮在它上面的东西。
-  2. **深度**：参考站没有 box-shadow，是因为它用影像和透明度造深度；
-     纯色平面上照搬「零投影」，剩下的就只有「方块叠方块」。
-  3. **形体变化**：圆、弧、胶囊、满幅色块、叠压的卡片 —— 而不是同一种矩形。
+三层结构：
 
-所以这一版补的是这三样：
+  1. **深色天幕**（`backdrop.paint_sky`）—— 深夜紫的天空，带缓慢漂移的极光色块、
+     星点与同心弧纹。它是整屏唯一有「气氛」的地方，也是玻璃能成立的前提。
+  2. **淡紫主色** —— 按钮、选中态、强调线。因为是淡紫，白字压在上面要够，
+     所以主色取 #6F5CAD 而不是更浅的薰衣草色。
+  3. **冷调中性** —— 背景不再是暖骨白，改成带一点紫的浅灰，跟着主色走。
 
-  · 窗口顶部一条**深墨绿渐变 Hero 带**（带同心弧纹），玻璃导航浮在上面 ——
-    这是参考站「深色底 + 玻璃 + 白色大字」那套关系的等价物；
-  · 卡片恢复**分层柔和投影 + 极浅渐变 + 发丝描边**，可点卡片悬停会抬起；
-  · 主按钮走**渐变 + 绿色辉光**，状态用**左侧色条**而不是灰字，
-    登录页做成**深色品牌面板 + 表单**的分栏。
+动效不靠外部依赖：PySide6 自带 QPropertyAnimation / QVariantAnimation /
+自定义 QGraphicsEffect 就够了（见 motion.py）。
 """
 from __future__ import annotations
 
 # ---- 配色 -----------------------------------------------------------------
 C = {
-    # 品牌绿阶（从最暗到最浅，够撑起渐变和色块，不是只有一个色号）
-    "primary_deep":   "#08170E",
-    "primary_ink":    "#0C2A19",
-    "primary":        "#0F4223",
-    "primary_2":      "#17512C",   # 渐变亮端
-    "primary_soft":   "#2E6B47",   # 装饰线 / 次级强调
-    "primary_mid":    "#8FA898",   # 半调
-    "primary_light":  "#E4ECE6",   # 浅底
-    "primary_tint":   "#F1F5F1",   # 极浅底
+    # 淡紫主色阶（从最深到最浅，够撑渐变、色块和状态）
+    "primary_deep":   "#1B1236",
+    "primary_ink":    "#2A1F52",
+    "primary":        "#6F5CAD",   # 主色：白字压得住
+    "primary_2":      "#8B79C9",   # 渐变亮端
+    "primary_soft":   "#A99AD8",
+    "primary_mid":    "#C6BCE6",
+    "primary_light":  "#E5E0F6",   # 浅底
+    "primary_tint":   "#F5F2FD",   # 极浅底
+    "primary_dark":   "#57468C",
 
-    # 兼容旧键名
-    "primary_dark":   "#0A2E18",
+    # 天幕（backdrop.paint_sky 用）
+    "sky_top":        "#3A2A6E",
+    "sky_mid":        "#241A4A",
+    "sky_bottom":     "#140D2B",
+    "sky_aurora_a":   "#A78CE6",   # 极光·薰衣草
+    "sky_aurora_b":   "#E296BE",   # 极光·暮粉
+    "sky_aurora_c":   "#786EDC",   # 极光·蓝紫
+    "sky_glow":       "#F3C9DE",   # 低空辉光
 
-    # 语义色（成功沿用主色，参考站是单色系统）
-    "accent":         "#0F4223",
-    "accent_light":   "#E4ECE6",
-    "warn":           "#96631A",
-    "warn_mid":       "#C08A2E",
-    "warn_light":     "#F7EFE1",
-    "danger":         "#A32E22",
-    "danger_mid":     "#C8503F",
-    "danger_light":   "#F8E9E6",
-    "danger_bright":  "#FF6B70",   # 深色面板上的告警红
+    # 语义色
+    "accent":         "#3D8F6D",   # 成功：柔和的玉绿（小面积，不破坏紫色调）
+    "accent_light":   "#E6F2EC",
+    "warn":           "#96681C",
+    "warn_mid":       "#C79433",
+    "warn_light":     "#F8F0DF",
+    "danger":         "#B03A4A",
+    "danger_mid":     "#D2606F",
+    "danger_light":   "#FAEAEC",
+    "danger_bright":  "#FF8095",   # 深色面板上的告警红
 
-    # 中性（暖调，跟着参考站的 #989490 走）
-    "bg":             "#F2F2F0",   # 骨白
-    "bg_soft":        "#EAE9E5",
-    "bg_deep":        "#E4E3DE",
+    # 中性（冷调，跟着紫走）
+    "bg":             "#F4F3F9",
+    "bg_soft":        "#EAE7F2",
+    "bg_deep":        "#E1DDEC",
     "card":           "#FFFFFF",
-    "card_soft":      "#FCFCFB",
-    "glass":          "rgba(255, 255, 255, 22%)",
-    "border":         "#E3E2DD",
-    "border_soft":    "#EEEDE8",
-    "border_strong":  "#D5D3CD",
-    "hairline":       "rgba(20, 32, 24, 7%)",
+    "card_soft":      "#FCFBFE",
+    "glass":          "rgba(255, 255, 255, 16%)",
+    "border":         "#E4E1EE",
+    "border_soft":    "#EFEDF6",
+    "border_strong":  "#D2CDE0",
+    "hairline":       "rgba(28, 20, 54, 7%)",
     "hairline_dark":  "rgba(255, 255, 255, 12%)",
 
-    "text":           "#191A17",
-    "text_dim":       "#6B6862",
-    "text_faint":     "#989490",
-    "text_ghost":     "#B3B0AD",
+    # 文字
+    "text":           "#1B1926",
+    "text_dim":       "#66626F",
+    "text_faint":     "#96929E",
+    "text_ghost":     "#B6B2C0",
 
-    # 深色面板
-    "log_bg":         "#0C1410",
-    "log_text":       "#D7D6D3",
-    "log_dim":        "#6E7671",
-    "ink":            "#111411",
-    "ink_soft":       "#1B1F1B",
-    "ink_text":       "#D7D6D3",
-    "ink_dim":        "#7E857F",
+    # 深色面板（日志）
+    "log_bg":         "#171029",
+    "log_text":       "#DAD6E6",
+    "log_dim":        "#6E6A82",
+    "ink":            "#171029",
+    "ink_soft":       "#221A3C",
+    "ink_text":       "#DAD6E6",
+    "ink_dim":        "#847E99",
 }
 
 # ---- 字体 -----------------------------------------------------------------
@@ -87,29 +91,30 @@ R_MD = 14
 R_IN = 11
 R_SM = 8
 
-# ---- 高度 -------------------------------------------------------------
-HERO_H = 116        # 顶部深色带（不含底部化开区）
-NAV_H = 48          # 玻璃导航胶囊
-RAIL_H = 32         # 步骤导轨
+# ---- 高度 -----------------------------------------------------------------
+HERO_H = 112        # 顶部天幕（不含底部化开区）
+NAV_H = 48
+RAIL_H = 32
+
+# ---- 动效时长（毫秒）------------------------------------------------------
+D_PAGE = 340        # 页面切换
+D_HOVER = 230       # 悬停抬起
+D_ENTER = 420       # 卡片入场
 
 
 def shadow_spec(level: str = "card") -> tuple[int, int, int, int, int, int, int]:
     """投影规格：(blur, dx, dy, r, g, b, alpha)。
 
-    分层柔投影 —— 一大一小两层叠出来的那种。纯色平面上没有它就只剩方块。
+    分层柔投影 —— 一大一小两层叠出来的那种。淡紫主色下投影也偏紫，
+    否则会在卡片边缘泛出一圈脏灰。
     """
     return {
-        # 常态卡片：贴着底，几乎感觉不到
-        "card":   (28, 0, 6, 18, 34, 24, 20),
-        # 悬停 / 抬起的卡片
-        "raised": (46, 0, 16, 16, 34, 22, 38),
-        # 玻璃导航：窄而实，像浮在带子上
-        "glass":  (22, 0, 8, 6, 24, 14, 46),
-        # 主按钮的绿色辉光
-        "glow":   (26, 0, 8, 15, 66, 35, 64),
-        "glow_hi": (34, 0, 12, 15, 66, 35, 92),
-        # 品牌面板里的元素
-        "panel":  (40, 0, 14, 4, 16, 9, 60),
+        "card":    (30, 0, 7, 38, 28, 74, 22),
+        "raised":  (48, 0, 17, 34, 24, 68, 42),
+        "glass":   (22, 0, 8, 10, 6, 26, 48),
+        "glow":    (28, 0, 9, 111, 92, 173, 78),
+        "glow_hi": (38, 0, 14, 111, 92, 173, 120),
+        "panel":   (40, 0, 14, 12, 8, 30, 62),
     }[level]
 
 
@@ -123,8 +128,6 @@ def stylesheet() -> str:
     font-size: 14px;
     color: {C['text']};
 }}
-/* 骨白底平涂（和参考站的 body 同色）。顶部 Hero 带与页面之间的过渡
-   由 Root 的 paintEvent 画一层柔光，见 widgets.paint_page_wash()。 */
 QWidget#Root, QStackedWidget, QScrollArea,
 QScrollArea > QWidget > QWidget {{
     background: {C['bg']};
@@ -137,54 +140,47 @@ QToolTip {{
 }}
 
 /* ======================================================================
-   顶部深色带：玻璃导航浮在上面
+   顶部天幕：玻璃导航浮在上面
    ====================================================================== */
-QWidget#HeroBand {{ background: transparent; }}
+QWidget#HeroBand, QWidget#BrandPanel {{ background: transparent; }}
 QFrame#NavPill {{
     background: rgba(255, 255, 255, 13%);
-    border: 1px solid rgba(255, 255, 255, 17%);
+    border: 1px solid rgba(255, 255, 255, 20%);
     border-radius: {NAV_H // 2}px;
 }}
 QLabel#Wordmark {{
-    font-size: 15.5px; font-weight: 700; color: rgba(255, 255, 255, 96%);
+    font-size: 15.5px; font-weight: 700; color: rgba(255, 255, 255, 97%);
 }}
 QLabel#NavMeta {{
-    color: rgba(255, 255, 255, 52%); font-size: 12.5px;
-    padding-right: 6px;
+    color: rgba(255, 255, 255, 54%); font-size: 12.5px; padding-right: 6px;
 }}
 QPushButton#NavGhost {{
     background: transparent; border: 1px solid transparent;
-    color: rgba(255, 255, 255, 74%);
+    color: rgba(255, 255, 255, 76%);
     font-size: 13px; font-weight: 600;
     padding: 5px 16px; min-height: 16px; border-radius: 14px;
 }}
 QPushButton#NavGhost:hover {{
-    background: rgba(255, 255, 255, 13%);
-    border: 1px solid rgba(255, 255, 255, 22%);
+    background: rgba(255, 255, 255, 14%);
+    border: 1px solid rgba(255, 255, 255, 26%);
     color: #FFFFFF;
 }}
-QPushButton#NavGhost:pressed {{ background: rgba(255, 255, 255, 20%); }}
-
-/* 页面区与 Hero 带之间的标题条 */
-QFrame#PageHead {{ background: transparent; }}
-QLabel#PageHeadTitle {{
-    font-size: 15px; font-weight: 700; color: {C['text']};
-}}
-QLabel#PageHeadMeta {{ color: {C['text_faint']}; font-size: 12.5px; }}
+QPushButton#NavGhost:pressed {{ background: rgba(255, 255, 255, 22%); }}
 
 /* ======================================================================
-   排版层级：眉标（小 / 淡）压在大标题（大 / 700 / 负字距）之上
+   排版层级：眉标（小 / 淡）压在大标题（大 / 700）之上
    ====================================================================== */
 QLabel#Eyebrow {{
     color: {C['text_faint']};
     font-size: 12.5px; font-weight: 600; letter-spacing: 1.2px;
 }}
-QLabel#EyebrowDark {{ color: rgba(255, 255, 255, 50%); font-size: 12.5px;
-    font-weight: 600; letter-spacing: 1.2px; }}
+QLabel#EyebrowDark {{
+    color: rgba(255, 255, 255, 56%);
+    font-size: 12.5px; font-weight: 600; letter-spacing: 1.2px;
+}}
 QLabel#PageTitle {{
     font-size: 33px; font-weight: 700; color: {C['text']};
 }}
-/* 表单卡片里的标题：比页面标题小一号，不跟左侧品牌面板的大字抢 */
 QLabel#FormTitle {{
     font-size: 26px; font-weight: 700; color: {C['text']};
 }}
@@ -204,7 +200,7 @@ QLabel#FieldLabel {{
 QLabel#Hint  {{ color: {C['text_dim']};   font-size: 13px; }}
 QLabel#Faint {{ color: {C['text_faint']}; font-size: 12.5px; }}
 QLabel#Error {{ color: {C['danger']};     font-size: 13px; }}
-QLabel#Success {{ color: {C['primary']};  font-size: 13px; }}
+QLabel#Success {{ color: {C['accent']};   font-size: 13px; }}
 QLabel#Warn  {{ color: {C['warn']};       font-size: 13px; }}
 
 QLabel#StatValue {{
@@ -216,21 +212,20 @@ QLabel#StatLabel {{
 QLabel#BigState {{
     font-size: 27px; font-weight: 700; color: {C['text']};
 }}
-/* 深色品牌面板上的大标题 */
 QLabel#BrandTitle {{
-    font-size: 40px; font-weight: 700; color: rgba(255, 255, 255, 97%);
+    font-size: 40px; font-weight: 700; color: rgba(255, 255, 255, 98%);
 }}
 QLabel#BrandSub {{
-    font-size: 14.5px; color: rgba(255, 255, 255, 62%);
+    font-size: 14.5px; color: rgba(255, 255, 255, 66%);
 }}
 QLabel#BrandMeta {{
-    font-size: 13px; color: rgba(255, 255, 255, 55%);
+    font-size: 13px; color: rgba(255, 255, 255, 58%);
 }}
 QLabel#Rule {{ background: {C['border_soft']}; border: none; }}
-QLabel#RuleDark {{ background: rgba(255, 255, 255, 12%); border: none; }}
+QLabel#RuleDark {{ background: rgba(255, 255, 255, 14%); border: none; }}
 
 /* ======================================================================
-   卡片：浅渐变 + 发丝描边（投影在代码里加，样式表画不了）
+   卡片：浅渐变 + 发丝描边（投影在代码里加）
    ====================================================================== */
 QFrame#Card {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -240,40 +235,37 @@ QFrame#Card {{
 }}
 QFrame#CardFlat {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #FDFDFC);
+                stop:0 #FFFFFF, stop:1 #FDFCFE);
     border: 1px solid {C['hairline']};
     border-radius: {R_MD}px;
 }}
 QFrame#CardFlat[hovered="true"] {{
-    border: 1px solid rgba(15, 66, 35, 34%);
+    border: 1px solid rgba(111, 92, 173, 38%);
     background: #FFFFFF;
 }}
 QFrame#Inset {{
     background: {C['primary_tint']};
-    border: 1px solid rgba(15, 66, 35, 10%);
+    border: 1px solid rgba(111, 92, 173, 12%);
     border-radius: {R_MD}px;
 }}
-/* 深色带上的玻璃块 */
 QFrame#GlassCard {{
     background: rgba(255, 255, 255, 10%);
-    border: 1px solid rgba(255, 255, 255, 15%);
+    border: 1px solid rgba(255, 255, 255, 16%);
     border-radius: {R_MD}px;
 }}
-
-/* 需要你本人操作（验证码 / 二次认证）的提示块 */
 QFrame#HumanBox {{
     background: {C['warn_light']};
-    border: 1px solid rgba(150, 99, 26, 20%);
+    border: 1px solid rgba(150, 104, 28, 20%);
     border-left: 3px solid {C['warn']};
     border-radius: {R_MD}px;
 }}
 
 /* ======================================================================
-   按钮：胶囊几何
+   按钮
    ====================================================================== */
 QPushButton {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #FBFBFA);
+                stop:0 #FFFFFF, stop:1 #FBFAFE);
     border: 1px solid {C['border_strong']};
     border-radius: {R_PILL}px;
     padding: 11px 22px;
@@ -290,7 +282,7 @@ QPushButton:hover {{
 QPushButton:pressed {{ background: {C['bg_soft']}; }}
 QPushButton:disabled {{
     color: {C['text_ghost']};
-    background: #F2F1ED;
+    background: #F2F1F7;
     border: 1px solid {C['border_soft']};
 }}
 
@@ -303,7 +295,7 @@ QPushButton#Primary {{
 }}
 QPushButton#Primary:hover {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #1C6034, stop:1 #124F2A);
+                stop:0 #9C8BD6, stop:1 #7A67BB);
     border: 1px solid {C['primary_2']};
     color: #FFFFFF;
 }}
@@ -312,23 +304,21 @@ QPushButton#Primary:pressed {{
                 stop:0 {C['primary']}, stop:1 {C['primary_dark']});
 }}
 QPushButton#Primary:disabled {{
-    background: #C4C7C2; border: 1px solid #C4C7C2; color: #FFFFFF;
+    background: #C9C5D6; border: 1px solid #C9C5D6; color: #FFFFFF;
 }}
 
-/* 深色带 / 品牌面板上的按钮 */
 QPushButton#OnDark {{
     background: rgba(255, 255, 255, 12%);
-    border: 1px solid rgba(255, 255, 255, 26%);
-    color: rgba(255, 255, 255, 95%);
+    border: 1px solid rgba(255, 255, 255, 28%);
+    color: rgba(255, 255, 255, 96%);
     font-weight: 600;
 }}
 QPushButton#OnDark:hover {{
     background: rgba(255, 255, 255, 22%);
-    border: 1px solid rgba(255, 255, 255, 46%);
+    border: 1px solid rgba(255, 255, 255, 50%);
     color: #FFFFFF;
 }}
 
-/* 行内小动作：同一种胶囊，只是更小 */
 QPushButton#Ghost {{
     background: transparent;
     border: 1px solid {C['border']};
@@ -339,7 +329,7 @@ QPushButton#Ghost {{
 }}
 QPushButton#Ghost:hover {{
     background: {C['primary_tint']};
-    border: 1px solid rgba(15, 66, 35, 26%);
+    border: 1px solid rgba(111, 92, 173, 30%);
     color: {C['primary']};
 }}
 QPushButton#Ghost:pressed {{ background: {C['primary_light']}; }}
@@ -347,8 +337,8 @@ QPushButton#Ghost:pressed {{ background: {C['primary_light']}; }}
 QPushButton#Danger {{
     color: {C['danger']};
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                stop:0 #FFFFFF, stop:1 #FDF9F8);
-    border: 1px solid rgba(163, 46, 34, 30%);
+                stop:0 #FFFFFF, stop:1 #FDF9FA);
+    border: 1px solid rgba(176, 58, 74, 32%);
 }}
 QPushButton#Danger:hover {{
     background: {C['danger_light']};
@@ -356,7 +346,6 @@ QPushButton#Danger:hover {{
     color: {C['danger']};
 }}
 
-/* 纯文字链接式按钮 */
 QPushButton#Link {{
     background: transparent; border: none;
     color: {C['text_dim']}; padding: 6px 4px;
@@ -389,7 +378,7 @@ QDateTimeEdit:focus, QPlainTextEdit:focus {{
 }}
 QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled,
 QDoubleSpinBox:disabled, QDateTimeEdit:disabled {{
-    background: #F2F1ED; color: {C['text_ghost']};
+    background: #F2F1F7; color: {C['text_ghost']};
     border: 1px solid {C['border_soft']};
 }}
 QComboBox::drop-down {{ border: none; width: 26px; }}
@@ -422,7 +411,7 @@ QCheckBox::indicator:checked {{
    ====================================================================== */
 QProgressBar {{
     border: none; border-radius: 3px;
-    background: rgba(15, 66, 35, 10%);
+    background: rgba(111, 92, 173, 12%);
     height: 6px; text-align: center; color: transparent;
 }}
 QProgressBar::chunk {{
@@ -439,7 +428,7 @@ QPlainTextEdit#Log {{
     font-family: {MONO_FAMILY};
     font-size: 12.5px;
     padding: 16px 18px;
-    selection-background-color: {C['primary_soft']};
+    selection-background-color: {C['primary_dark']};
 }}
 QPlainTextEdit#Log QScrollBar::handle:vertical {{
     background: rgba(255, 255, 255, 22%); border-radius: 5px;
@@ -457,18 +446,16 @@ QPlainTextEdit#Log QScrollBar:vertical {{
 QListWidget {{ background: transparent; border: none; outline: none; }}
 QListWidget::item {{ border-radius: {R_MD}px; margin: 3px 0; }}
 
-/* 滚动条：做得尽量轻。原来 11px 宽的浅灰把手会横在布局中间，
-   把版面切成两半 —— 这里是整屏最容易被忽略、也最破坏整洁的一处。 */
 QScrollBar:vertical {{ background: transparent; width: 9px; margin: 3px 2px; }}
 QScrollBar::handle:vertical {{
-    background: rgba(20, 32, 24, 12%); border-radius: 4px; min-height: 40px;
+    background: rgba(28, 20, 54, 14%); border-radius: 4px; min-height: 40px;
 }}
-QScrollBar::handle:vertical:hover {{ background: rgba(20, 32, 24, 26%); }}
+QScrollBar::handle:vertical:hover {{ background: rgba(28, 20, 54, 28%); }}
 QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 2px 3px; }}
 QScrollBar::handle:horizontal {{
-    background: rgba(20, 32, 24, 12%); border-radius: 4px; min-width: 40px;
+    background: rgba(28, 20, 54, 14%); border-radius: 4px; min-width: 40px;
 }}
-QScrollBar::handle:horizontal:hover {{ background: rgba(20, 32, 24, 26%); }}
+QScrollBar::handle:horizontal:hover {{ background: rgba(28, 20, 54, 28%); }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 """

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """界面冒烟测试：构建主窗口，逐页渲染成 PNG 检查排版；并模拟一遍完整流程。"""
 import os
 import sys
@@ -30,6 +30,11 @@ from app.gui.theme import stylesheet
 app.setStyleSheet(stylesheet())
 
 from app.gui.main_window import MainWindow
+from app.gui import motion
+
+# 截图回归必须关掉动效：否则抓到的是动画中间帧。
+# （第一版没关，模式页切过去时三张模式卡正好还在淡出，整片不见了。）
+motion.ENABLED = False
 
 out = Path(__file__).parent / "shots"
 out.mkdir(exist_ok=True)

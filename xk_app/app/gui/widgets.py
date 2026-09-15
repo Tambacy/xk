@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
                                QLabel, QPushButton, QSizePolicy, QVBoxLayout,
                                QWidget)
 
+from .backdrop import paint_sky
+from .motion import Aurora, CountUp
 from .theme import C, HERO_H, STEPS, shadow_spec
 
 
@@ -125,69 +127,58 @@ class ShadowAnim:
 
 
 # ==========================================================================
-# 深色面板：顶部 Hero 带 / 登录页品牌面板共用同一套画法
+# 天幕：顶部 Hero 带 / 登录页品牌面板共用
 # ==========================================================================
-def paint_dark_panel(p: QPainter, w: int, h: int, *,
-                     arcs: bool = True, fade_to_bg: int = 0) -> None:
-    """画一块深墨绿渐变面板：底色渐变 + 顶部辉光 + 同心弧纹。
+class SkySurface(QWidget):
+    """画天幕的基类，并持有一个慢速相位驱动。
 
-    同心弧是参考站那种「充气结构」弧线的抽象 —— 也是整屏唯一一处
-    非矩形的装饰，用来打破方块感。
+    相位每帧推进一点点 → 极光漂移、星点明灭。窗口失焦时停掉，
+    不做无意义的后台重绘。
     """
-    p.setRenderHint(QPainter.Antialiasing, True)
 
-    g = QLinearGradient(0, 0, 0, h)
-    g.setColorAt(0.00, QColor("#1B5A36"))
-    g.setColorAt(0.34, QColor("#123F24"))
-    g.setColorAt(0.70, QColor(C["primary_ink"]))
-    g.setColorAt(1.00, QColor(C["primary_deep"]))
-    p.fillRect(0, 0, w, h, g)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._aurora = Aurora(self)
+        self._phase = 0.0
 
-    # 顶部偏左的柔光，让渐变的顶端「亮起来」
-    rg = QRadialGradient(QPointF(w * 0.34, -h * 0.28), max(w, h) * 0.92)
-    rg.setColorAt(0.0, QColor(255, 255, 255, 34))
-    rg.setColorAt(0.55, QColor(255, 255, 255, 9))
-    rg.setColorAt(1.0, QColor(255, 255, 255, 0))
-    p.fillRect(0, 0, w, h, rg)
+    def phase(self) -> float:
+        return self._aurora.phase
 
-    if arcs:
-        p.save()
-        p.setClipRect(0, 0, w, int(h - fade_to_bg))
-        p.setBrush(Qt.NoBrush)
-        cx, cy = w * 0.5, h * 1.62
-        for i in range(10):
-            ry = h * (0.52 + i * 0.30)
-            alpha = int(26 - i * 2.1)
-            if alpha <= 2:
-                break
-            pen = QPen(QColor(255, 255, 255, alpha))
-            pen.setWidthF(1.0)
-            p.setPen(pen)
-            p.drawEllipse(QPointF(cx, cy), ry * 2.35, ry)
-        p.restore()
+    def showEvent(self, e):
+        self._aurora.start()
+        super().showEvent(e)
 
-    # 底部融进页面底色：深色带不是被生硬切断的，而是化开的。
-    # 用「页面底色逐渐盖上」的方式，而不是往深色里掺灰 —— 掺灰会在
-    # 中间调留下一道看得见的灰带。
-    if fade_to_bg > 0:
-        fg = QLinearGradient(0, h - fade_to_bg, 0, h)
-        base = QColor(C["bg"])
-        for pos, a in ((0.00, 0), (0.38, 96), (0.72, 208), (1.00, 255)):
-            c = QColor(base)
-            c.setAlpha(a)
-            fg.setColorAt(pos, c)
-        p.fillRect(0, int(h - fade_to_bg), w, fade_to_bg, fg)
+    def hideEvent(self, e):
+        self._aurora.stop()
+        super().hideEvent(e)
+
+    def changeEvent(self, e):
+        # 失焦 / 最小化时停，回到前台再开 —— 不做无意义的后台重绘
+        t = e.type()
+        if t == QEvent.WindowStateChange:
+            if self.window().isMinimized():
+                self._aurora.stop()
+            elif self.isVisible():
+                self._aurora.start()
+        elif t == QEvent.ActivationChange:
+            if self.window().isActiveWindow():
+                if self.isVisible():
+                    self._aurora.start()
+            else:
+                self._aurora.stop()
+        super().changeEvent(e)
 
 
-class HeroBand(QWidget):
-    """窗口顶部那条深色带：玻璃导航胶囊 + 步骤导轨都在它上面。
+class HeroBand(SkySurface):
+    """窗口顶部那条天幕：玻璃导航胶囊 + 步骤导轨都在它上面。
 
     参考站的首屏是「满幅深色影像 + 浮在上面的玻璃导航 + 白色大字」。
-    桌面应用没有影像可放，于是用一块深墨绿渐变面板顶上 ——
-    玻璃只有浮在深色上才成立，浮在米白底上的玻璃等于看不见。
+    玻璃只有浮在深色上才成立 —— 浮在浅色底上的玻璃等于看不见。
+    这里用程序生成的夜空（backdrop.paint_sky）充当那块「影像」。
     """
 
-    FADE = 34          # 底部化开进页面的像素高度
+    FADE = 64          # 底部化开进页面的像素高度。太短会在天幕下沿
+                       # 压出一条发亮的横带（深紫到浅底之间的落差不小）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -197,7 +188,7 @@ class HeroBand(QWidget):
 
         v = QVBoxLayout(self)
         v.setContentsMargins(28, 14, 28, 0)
-        v.setSpacing(12)
+        v.setSpacing(10)
 
         # 居中、贴合内容的玻璃胶囊（参考站的 nav 就是这样一条，不是通栏横条）
         self.nav = QFrame()
@@ -213,11 +204,12 @@ class HeroBand(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        paint_dark_panel(p, self.width(), HERO_H, arcs=True, fade_to_bg=self.FADE)
+        paint_sky(p, self.width(), self.height(), self.phase(),
+                  fade_to=C["bg"], fade_h=self.FADE)
 
 
-class BrandPanel(QWidget):
-    """登录页左侧的深色品牌面板 —— 和 HeroBand 同一套视觉语言。"""
+class BrandPanel(SkySurface):
+    """登录页左侧的品牌面板 —— 和顶部天幕同一套画法，只是更高。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -227,7 +219,7 @@ class BrandPanel(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        paint_dark_panel(p, self.width(), self.height(), arcs=True)
+        paint_sky(p, self.width(), self.height(), self.phase())
 
 
 class LogoMark(QWidget):
@@ -700,13 +692,18 @@ class StatTile(QFrame):
         self.v = QLabel(value)
         self.v.setObjectName("StatValue")
         lay.addWidget(self.v)
+        self._count = CountUp(self.v, self)
 
     def set_accent(self, color: str):
         self._accent = color
         self._dot.setStyleSheet(f"background:{color};border-radius:3px;")
 
-    def set(self, value: str):
-        self.v.setText(str(value))
+    def set(self, value: str, animate: bool = True):
+        """数字滚动到新值；'—'、'00:01:23' 这类非数字直接落值。"""
+        if animate:
+            self._count.to(str(value))
+        else:
+            self.v.setText(str(value))
 
     def enterEvent(self, e):
         self._sh.to("raised")
@@ -722,7 +719,7 @@ StatBox = StatTile
 
 
 class Dot(QWidget):
-    """状态点：可选一圈柔光（监听中时呼吸用）。"""
+    """状态点：外圈柔光。`set_pulse()` 推进光晕大小 —— 监听中会「呼吸」。"""
 
     def __init__(self, color: str = None, size: int = 10, halo: bool = True,
                  parent=None):
@@ -730,11 +727,38 @@ class Dot(QWidget):
         self._color = QColor(color or C["text_faint"])
         self._size = size
         self._halo = halo
+        self._pulse = 0.0
+        self._breathing = False
         pad = int(size * 1.5) if halo else 2
         self.setFixedSize(size + pad * 2, size + pad * 2)
 
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(2100)
+        self._anim.setLoopCount(-1)
+        self._anim.setStartValue(0.0)
+        self._anim.setKeyValueAt(0.5, 1.0)
+        self._anim.setEndValue(0.0)
+        self._anim.setEasingCurve(QEasingCurve.InOutSine)
+        self._anim.valueChanged.connect(self._on_pulse)
+
     def set_color(self, color: str):
         self._color = QColor(color)
+        self.update()
+
+    def set_breathing(self, on: bool):
+        """监听中 / 正在抢课时让光晕呼吸；其余状态静止，不分散注意力。"""
+        if on == self._breathing:
+            return
+        self._breathing = on
+        if on:
+            self._anim.start()
+        else:
+            self._anim.stop()
+            self._pulse = 0.0
+            self.update()
+
+    def _on_pulse(self, v):
+        self._pulse = float(v)
         self.update()
 
     def paintEvent(self, e):
@@ -742,14 +766,17 @@ class Dot(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         cx, cy = self.width() / 2.0, self.height() / 2.0
         if self._halo:
-            g = QRadialGradient(QPointF(cx, cy), self._size * 2.0)
-            h = QColor(self._color); h.setAlpha(70)
+            r = self._size * (1.7 + 0.75 * self._pulse)
+            g = QRadialGradient(QPointF(cx, cy), r)
+            h = QColor(self._color)
+            h.setAlpha(int(58 + 70 * self._pulse))
             g.setColorAt(0.0, h)
-            h2 = QColor(self._color); h2.setAlpha(0)
+            h2 = QColor(self._color)
+            h2.setAlpha(0)
             g.setColorAt(1.0, h2)
             p.setPen(Qt.NoPen)
             p.setBrush(g)
-            p.drawEllipse(QPointF(cx, cy), self._size * 2.0, self._size * 2.0)
+            p.drawEllipse(QPointF(cx, cy), r, r)
         p.setBrush(self._color)
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(cx, cy), self._size / 2.0, self._size / 2.0)
