@@ -108,9 +108,10 @@ cfg.set_courses([CourseEntry(action="grab", kind="ty", kch="10721071", kxh="2",
                              name="三年级男生乒乓球", time_text="4-1")])
 
 lines = []
+pushes = []          # 每次推给界面的状态字典，用来验证推送顺序
 s2 = Scheduler(cfg, paths, password=sec["pass"],
                on_log=lambda m, l="INFO": (lines.append(f"[{l}] {m}"), print("     ", m)),
-               on_status=lambda st: None,
+               on_status=lambda st: pushes.append(dict(st)),
                on_finished=lambda r: print("     完成：", r))
 s2.start()
 deadline = time.time() + 25
@@ -124,6 +125,41 @@ s2.join(20)
 check("实际发起了轮询", s2.status.polls > 0)
 check("运行中状态正确", s2.status.state in (State.MONITORING, State.STOPPED, State.SUCCESS, "monitoring", "stopped", "success"))
 check("没有异常退出", any("运行出错" in l for l in lines), False)
+
+# 推送顺序：message 里写的秒数必须和 next_poll_in 对得上。
+#
+# 这是那个 bug 的准确特征 —— 界面同一块地方显示两个值：上面那行文字写
+# 「下次 260.5s 后」，下面的「距下次检查」却是一根横杠。因为 _push() 在
+# next_poll_in 赋值之前执行，字段里是上一轮的（第一轮是 0）。
+#
+# 不能简单地断言 next_poll_in > 0：轮询本身耗时超过一个周期时，
+# remain 合法地就是 0（实测重新登录那一次就会）。要比的是两者一致。
+import re as _re
+
+
+def _secs_in_message(msg):
+    m = _re.search(r"下次\s*([\d.]+)\s*s", msg or "")
+    return float(m.group(1)) if m else None
+
+
+_bad_push = []
+for p in pushes:
+    if p.get("state") not in ("monitoring", "waiting"):
+        continue
+    want = _secs_in_message(p.get("message"))
+    if want is None:
+        continue                      # 「夜间静默中」这类消息里没有秒数
+    got = float(p.get("next_poll_in") or 0)
+    if abs(want - got) > 1.0:         # 消息里四舍五入过，给 1 秒容差
+        _bad_push.append({"message": p.get("message"), "next_poll_in": got})
+
+_checked = sum(1 for p in pushes
+               if p.get("state") in ("monitoring", "waiting")
+               and _secs_in_message(p.get("message")) is not None)
+print(f"     共推送 {len(pushes)} 次状态；可比对的 {_checked} 次，"
+      f"对不上的 {len(_bad_push)} 次")
+check("message 里的秒数与 next_poll_in 一致", _bad_push, [])
+check("确实比对到了（自检：别扫了个空）", _checked > 0, True)
 print()
 print("    最近日志：")
 for l in lines[-10:]:

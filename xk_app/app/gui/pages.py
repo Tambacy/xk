@@ -1160,6 +1160,8 @@ class MonitorPage(QWidget):
 
 
         self._t0 = None
+        # 下一轮检查的到期时刻（界面自己走秒用，见 _tick）
+        self._next_at = None
         # 计时器不在构造时启动 —— 由 set_state 按「还在跑 / 已停下」开关。
         # 以前是无条件 start(1000)，于是点完「停止」之后界面显示「已停止」，
         # 「已运行」那一栏却还在秒秒往上加。
@@ -1170,7 +1172,12 @@ class MonitorPage(QWidget):
     def reset(self, entries):
         self.log.clear()
         self._t0 = datetime.now()
+        self._next_at = None
         self._rows = {}
+        # 先落到 00:00:00。计时器一秒才走第一格，不初始化的话
+        # 刚点开始的那一秒里「已运行」是一根横杠，看着像没跑起来。
+        self.st_run.set("00:00:00", animate=False)
+        self.st_next.set("—", animate=False)
         self.set_state("preparing", "准备中", "正在启动浏览器并登录…")
         clear_layout(self.card_courses.body, keep_tail=1)
         self.course_labels = []
@@ -1196,7 +1203,16 @@ class MonitorPage(QWidget):
         if self._t0:
             secs = int((datetime.now() - self._t0).total_seconds())
             h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
-            self.st_run.set(f"{h:02d}:{m:02d}:{s:02d}")
+            self.st_run.set(f"{h:02d}:{m:02d}:{s:02d}", animate=False)
+
+        # 「距下次检查」在界面上自己走秒。
+        # 调度器一个周期只推一次状态，600 秒的间隔要是照搬那个数字，
+        # 屏幕上会一直停在同一个值，看不出到底在不在倒计时。
+        if self._next_at is None:
+            self.st_next.set("—", animate=False)
+        else:
+            left = max(0.0, (self._next_at - datetime.now()).total_seconds())
+            self.st_next.set(f"{left:.0f}s", animate=False)
 
     # 「还在跑」的几个状态：这时不给返回入口，避免用户在抢课中途切走。
     # stopping 也算在跑 —— 正在收尾时不该跳出「返回设置」。
@@ -1229,6 +1245,10 @@ class MonitorPage(QWidget):
         else:
             self._timer.stop()
             self._t0 = None
+            self._next_at = None
+            # 立刻刷一次：计时器已经停了，不主动刷的话「距下次检查」会
+            # 一直停在最后一个数字上，看起来像还在倒计时。
+            self._tick()
 
     def update_status(self, s: dict):
         self._last_status = s
@@ -1240,8 +1260,10 @@ class MonitorPage(QWidget):
         }
         self.set_state(state, titles.get(state, state), s.get("message", ""))
         self.st_poll.set(s.get("polls", 0))
+        # 记下「下一轮什么时候到」，交给 _tick 逐秒刷新成倒计时
         nxt = s.get("next_poll_in") or 0
-        self.st_next.set(f"{nxt:.1f}s" if nxt else "—")
+        self._next_at = (datetime.now() + timedelta(seconds=float(nxt))) if nxt else None
+        self._tick()
         got = s.get("success") or []
         self.st_got.set(len(got))
         rows = s.get("courses") or []

@@ -32,7 +32,7 @@ from typing import Any
 
 APP_DIR_NAME = "XkHelper"
 APP_DISPLAY_NAME = "学校选课助手"
-APP_VERSION = "0.3.2"
+APP_VERSION = "0.3.3"
 
 
 def app_root() -> Path:

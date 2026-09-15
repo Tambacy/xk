@@ -357,12 +357,12 @@ class Scheduler:
                     self.say("阶段信息不明确，但时间已到，先试一次提交。", "WARN")
                     return
                 self.status.message = f"阶段信息不明确：{text}"
-            self._push()
-            # 按周期结算：把这一轮本身耗掉的时间扣掉，否则真实间隔会被
-            # 请求耗时越拖越长（humanize.py 里写明的第三条原则）
+            # 先算 remain 再 push —— 顺序反了的话界面拿到的是上一轮的
+            # next_poll_in（第一轮是初始值 0），「距下次检查」就一直是横杠。
             period = rhythm.next()
             remain = max(0.0, period - (time.time() - t_round))
             self.status.next_poll_in = remain
+            self._push()
             if not self._sleep(remain):
                 return
 
@@ -420,10 +420,21 @@ class Scheduler:
                 pause(6, 12)      # 抢到之后再低频确认几次
                 continue
 
+            # 按周期结算：扣掉本轮轮询耗掉的时间。非体育课要走页面搜索，
+            # 一轮可能好几秒，不扣的话真实间隔会明显长于设定值。
+            #
+            # ⚠ 必须先算 remain、再写 status、最后 _push()。
+            # 原来的顺序是「先 push 再赋值」，界面拿到的永远是**上一轮**的
+            # next_poll_in（第一轮就是初始值 0），于是「距下次检查」那一栏
+            # 一直显示成横杠 —— 而同一行的 message 里却写着「下次 260.5s 后」，
+            # 同一份数据两个说法。
+            remain = max(0.0, period - (time.time() - t_round))
+            self.status.next_poll_in = remain
+
             # 给界面一个能看懂的当前状态
             brief = "、".join(f"{c['kyl']}" for c in (self.status.courses or [])) or "—"
             self.status.message = (f"监听中 · 已轮询 {self.status.polls} 次 · "
-                                   f"课余量 {brief} · 下次 {period:.1f}s 后")
+                                   f"课余量 {brief} · 下次 {remain:.0f}s 后")
             self._push()
             # 每 5 分钟在信息级留一条汇总，方便事后看"那段时间到底在不在跑"
             if time.time() - last_report > 300:
@@ -431,10 +442,6 @@ class Scheduler:
                 log.info("监听中：已轮询 %d 次，状态 %s", self.status.polls,
                          "; ".join(f"{c['label']} 课余量{c['kyl']}" for c in
                                    (self.status.courses or [])))
-            # 按周期结算：扣掉本轮轮询耗掉的时间。非体育课要走页面搜索，
-            # 一轮可能好几秒，不扣的话真实间隔会明显长于设定值。
-            remain = max(0.0, period - (time.time() - t_round))
-            self.status.next_poll_in = remain
             if not self._sleep(remain):
                 return
 
