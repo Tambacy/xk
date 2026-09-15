@@ -203,6 +203,10 @@ class MainWindow(QMainWindow):
             self.page_courses.set_headless(self.cfg.headless)
             self.page_courses.set_entries(self.entries, self.results)
         if index == 3:
+            # 进确认页之前先把界面上的设置读回配置。
+            # 以前只在 on_start 里读，于是确认页拿到的还是**默认值** ——
+            # 界面上填了 600 秒，确认页照样显示「平均 3 秒」。
+            self._collect_settings()
             self.page_confirm.refresh(self.cfg, self.entries)
 
     # ------------------------------------------------------------------
@@ -475,21 +479,30 @@ class MainWindow(QMainWindow):
                         self.entries[index].label(), result.get("reason"))
 
     # ------------------------------------------------------------------
-    def on_start(self):
+    def _collect_settings(self):
+        """把「预定课程」页上的设置读回配置对象。
+
+        确认页和真正的启动都读 cfg，所以**必须在显示确认页之前**先同步一次，
+        否则确认页显示的是默认值而不是用户刚填的值。
+        """
         cfg = self.cfg
-        cfg.poll_avg = self.page_courses.sp_avg.value()
-        cfg.lead_seconds = self.page_courses.sp_lead.value()
-        cfg.dry_run = self.page_courses.cb_dry.isChecked()
-        cfg.headless = self.page_courses.headless()
-        cfg.xnxq = self.page_courses.current_xnxq() or cfg.xnxq
-        cfg.night_silence = (["01:00", "06:00"]
-                             if self.page_courses.cb_night.isChecked() else [])
+        pc = self.page_courses
+        cfg.poll_avg = pc.sp_avg.value()
+        cfg.lead_seconds = pc.sp_lead.value()
+        cfg.dry_run = pc.cb_dry.isChecked()
+        cfg.headless = pc.headless()
+        cfg.xnxq = pc.current_xnxq() or cfg.xnxq
+        cfg.night_silence = (["01:00", "06:00"] if pc.cb_night.isChecked() else [])
         if cfg.mode in (1, 2):
-            dt = self.page_courses.dt_start.dateTime().toPython()
+            dt = pc.dt_start.dateTime().toPython()
             cfg.start_time = dt.strftime("%Y-%m-%d %H:%M")
         else:
             cfg.start_time = ""
         cfg.set_courses(self.entries)
+
+    def on_start(self):
+        cfg = self.cfg
+        self._collect_settings()
         self.save_config()
 
         self.page_monitor.reset(self.entries)

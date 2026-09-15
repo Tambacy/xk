@@ -157,6 +157,12 @@ class BrowserCore(QThread):
     def do_stop(self):
         if self.scheduler:
             self.scheduler.stop("界面请求停止")
+        else:
+            # 还没有调度器可停（刚点开始、工作线程还没来得及建；或这轮已经跑完）。
+            # 不补这一下的话不会再有人发 finished，界面就永远停在「正在停止…」——
+            # 既回不去也没得停。
+            self.say("没有正在运行的任务。")
+            self.finished.emit("stopped")
         self.cancel_prompt()
         self._jobs.put(("nop", None))
 

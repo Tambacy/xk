@@ -9,8 +9,8 @@
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `XkHelper-Setup-0.3.0.exe` | 334 MB | 安装包，推荐。自包含，装完即用 |
-| `XkHelper-v0.3.0-source.zip` | 607 KB | 源码，自行修改或构建用 |
+| `XkHelper-Setup-0.3.1.exe` | 334 MB | 安装包，推荐。自包含，装完即用 |
+| `XkHelper-v0.3.1-source.zip` | 1449 KB | 源码，自行修改或构建用 |
 
 安装包体积大是因为内置了一整个 Chromium（解压后约 426 MB）—— 程序需要真实浏览器
 才能以真实事件操作页面，而不是发送脚本化的 HTTP 请求。
@@ -74,7 +74,7 @@
 ```powershell
 cd xk_app
 powershell -ExecutionPolicy Bypass -File build.ps1
-# 产物：installer\XkHelper-Setup-0.3.0.exe（约 330 MB，自包含）
+# 产物：installer\XkHelper-Setup-0.3.1.exe（约 330 MB，自包含）
 ```
 
 依赖：Python 3.13、PySide6、playwright、PyInstaller、Inno Setup 6。

@@ -1030,7 +1030,9 @@ class ConfirmPage(QWidget):
         else:
             add(f"<b>长期后台监听</b>，平均每 {cfg.poll_avg:g} 秒查一次课余量。")
             add("发现有余量立刻抢；需要让位就先退课。")
-            add("拟人化：间隔随机长尾、偶尔拉长、夜间静默。")
+            # 这里不再写死「夜间静默」—— 它是可关的，写死在说明里会和
+            # 下面那行真实状态自相矛盾（取消勾选后上面还写着夜间静默）。
+            add("拟人化：间隔随机长尾、偶尔拉长。")
 
         if cfg.night_silence:
             add(f"🌙 夜间静默：{cfg.night_silence[0]} ~ {cfg.night_silence[1]} 期间完全不发请求")
@@ -1151,9 +1153,11 @@ class MonitorPage(QWidget):
 
 
         self._t0 = None
+        # 计时器不在构造时启动 —— 由 set_state 按「还在跑 / 已停下」开关。
+        # 以前是无条件 start(1000)，于是点完「停止」之后界面显示「已停止」，
+        # 「已运行」那一栏却还在秒秒往上加。
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(1000)
         self._last_status = {}
 
     def reset(self, entries):
@@ -1210,6 +1214,14 @@ class MonitorPage(QWidget):
         self.btn_back.setVisible(not running)
         self.btn_stop.setVisible(running)
         self.btn_stop.setEnabled(state != "stopping")
+
+        # 「已运行」只在跑的时候走字；停下就冻结在最后一刻，不再累加
+        if running:
+            if not self._timer.isActive():
+                self._timer.start(1000)
+        else:
+            self._timer.stop()
+            self._t0 = None
 
     def update_status(self, s: dict):
         self._last_status = s
