@@ -57,7 +57,7 @@ class MainWindow(QMainWindow):
         self.band = HeroBand()
         nr = self.band.nav_row
 
-        nr.addWidget(LogoMark(32, "清", dark=True))
+        nr.addWidget(LogoMark(30, "清", dark=True))
 
         logo = QLabel(APP_DISPLAY_NAME)
         logo.setObjectName("Wordmark")
@@ -162,6 +162,8 @@ class MainWindow(QMainWindow):
         self.page_monitor.stop.connect(self.on_stop)
         self.page_monitor.open_logs.connect(self.on_open_logs)
         self.page_monitor.export_diag.connect(self.on_export_diag)
+        # 停止 / 结束之后回到「预定课程」，可以直接改设置再跑一次
+        self.page_monitor.restart.connect(self.on_restart)
 
     # 每页一种天幕「心情」：五页共用同一张背景的话，翻过去几乎没有
     # 「换了个地方」的感觉。索引 = 页面索引。
@@ -503,7 +505,17 @@ class MainWindow(QMainWindow):
                                 "确定要停止吗？停止后就不会再帮你盯着了。") == QMessageBox.Yes:
             if self.core:
                 self.core.do_stop()
-            self.page_monitor.set_state("stopped", "正在停止…", "等待当前动作结束")
+            self.page_monitor.set_state("stopping", "正在停止…", "等待当前动作结束")
+
+    def on_restart(self):
+        """从监控页返回设置页。
+
+        监控页以前没有任何返回入口：点完「停止」就卡在那一页，
+        只能关掉整个程序重开。核心线程是常驻的（只在整个程序退出时
+        才结束），所以改完设置直接再点「开始运行」就能重跑。
+        """
+        log.info("从监控页返回设置页。")
+        self.goto(2)
 
     def on_core_finished(self, reason: str):
         titles = {"success": "已完成", "stopped": "已停止",

@@ -1092,6 +1092,13 @@ class MonitorPage(QWidget):
         self.lb_state.setObjectName("BigState")
         head.addWidget(self.lb_state)
         head.addStretch(1)
+        # 停止 / 跑完之后得能回得去。以前这一页没有任何返回入口 ——
+        # 点完「停止」就卡在这儿，只能关掉整个程序重开。
+        self.btn_back = QPushButton("← 返回设置")
+        self.btn_back.setCursor(Qt.PointingHandCursor)
+        self.btn_back.clicked.connect(self.restart.emit)
+        self.btn_back.setVisible(False)
+        head.addWidget(self.btn_back)
         self.btn_logs = QPushButton("打开日志")
         self.btn_logs.clicked.connect(self.open_logs.emit)
         head.addWidget(self.btn_logs)
@@ -1180,19 +1187,29 @@ class MonitorPage(QWidget):
             h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
             self.st_run.set(f"{h:02d}:{m:02d}:{s:02d}")
 
+    # 「还在跑」的几个状态：这时不给返回入口，避免用户在抢课中途切走。
+    # stopping 也算在跑 —— 正在收尾时不该跳出「返回设置」。
+    RUNNING_STATES = ("preparing", "waiting", "monitoring", "acting", "stopping")
+
     def set_state(self, state, title, message=""):
         colors = {
             "preparing": C["primary"], "waiting": C["warn"],
             "monitoring": C["accent"], "acting": C["primary"],
             "success": C["accent"], "stopped": C["text_faint"],
-            "error": C["danger"],
+            "stopping": C["text_faint"], "error": C["danger"],
         }
         self.dot.set_color(colors.get(state, C["text_faint"]))
         # 只有「真的在跑」的状态才让光晕呼吸；静止状态不分散注意力
+        running = state in self.RUNNING_STATES
         self.dot.set_breathing(state in ("monitoring", "acting"))
         self.lb_state.setText(title)
         if message:
             self.lb_msg.setText(message)
+
+        # 停下来之后才给「返回设置」；跑着的时候只留「停止」
+        self.btn_back.setVisible(not running)
+        self.btn_stop.setVisible(running)
+        self.btn_stop.setEnabled(state != "stopping")
 
     def update_status(self, s: dict):
         self._last_status = s

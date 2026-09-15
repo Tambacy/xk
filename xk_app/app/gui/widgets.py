@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
 
 from .backdrop import paint_sky
 from .motion import Aurora, CountUp
-from .theme import C, HERO_H, STEPS, shadow_spec
+from .theme import C, HERO_H, RAIL_H, STEPS, shadow_spec
 
 
 # ==========================================================================
@@ -187,8 +187,9 @@ class HeroBand(SkySurface):
     这里用程序生成的夜空（backdrop.paint_sky）充当那块「影像」。
     """
 
-    FADE = 64          # 底部化开进页面的像素高度。太短会在天幕下沿
-                       # 压出一条发亮的横带（深紫到浅底之间的落差不小）
+    FADE = 46          # 底部化开进页面的像素高度。太短会在天幕下沿
+                       # 压出一条发亮的横带（深紫到浅底之间的落差不小）；
+                       # 但也不能太长 —— 整条带子占的竖向空间是要还回去的。
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -197,8 +198,8 @@ class HeroBand(SkySurface):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         v = QVBoxLayout(self)
-        v.setContentsMargins(28, 14, 28, 0)
-        v.setSpacing(10)
+        v.setContentsMargins(28, 10, 28, 0)
+        v.setSpacing(8)
 
         # 居中、贴合内容的玻璃胶囊（参考站的 nav 就是这样一条，不是通栏横条）
         self.nav = QFrame()
@@ -282,15 +283,15 @@ class StepRail(QWidget):
     这里整条导轨自绘，编号圆点和连接线才连得起来。
     """
 
-    NODE = 26
-    GAP = 10          # 圆点 → 文字
-    LINK = 30         # 文字 → 下一个圆点
+    NODE = 24
+    GAP = 9           # 圆点 → 文字
+    LINK = 28         # 文字 → 下一个圆点
     LINK_MIN = 12
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current = 0
-        self.setFixedHeight(34)
+        self.setFixedHeight(RAIL_H)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set_current(self, index: int):
@@ -313,7 +314,7 @@ class StepRail(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.TextAntialiasing, True)
 
-        f_lab = ui_font(13, QFont.DemiBold)
+        f_lab = ui_font(12.5, QFont.DemiBold)
         p.setFont(f_lab)
         fm = p.fontMetrics()
         widths, link, total = self._layout(fm)
@@ -362,7 +363,7 @@ class StepRail(QWidget):
             # 圆点里的字 / 勾
             if st == "done":
                 p.setPen(QColor(255, 255, 255, 220))
-                p.setFont(ui_font(13, QFont.Bold))
+                p.setFont(ui_font(12.5, QFont.Bold))
                 p.drawText(QRectF(nx - r, cy - r, r * 2, r * 2),
                            Qt.AlignCenter, "✓")
                 p.setFont(f_lab)
@@ -382,7 +383,7 @@ class StepRail(QWidget):
                 col, weight = QColor(255, 255, 255, 200), QFont.DemiBold
             else:
                 col, weight = QColor(255, 255, 255, 108), QFont.Normal
-            p.setFont(ui_font(13, weight))
+            p.setFont(ui_font(12.5, weight))
             p.setPen(col)
             p.drawText(QRectF(tx, 0, widths[i] - self.NODE - self.GAP, h),
                        Qt.AlignVCenter | Qt.AlignLeft, STEPS[i])

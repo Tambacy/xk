@@ -92,9 +92,12 @@ R_IN = 11
 R_SM = 8
 
 # ---- 高度 -----------------------------------------------------------------
-HERO_H = 112        # 顶部天幕（不含底部化开区）
-NAV_H = 48
-RAIL_H = 32
+# 顶部天幕带整条（HERO_H + HeroBand.FADE）压到 142px 左右。
+# 之前是 112+64=176 —— 在 760 高的窗口里占了近四分之一，
+# 「预定课程」这类要操作的页面会明显感觉内容被顶到下面去了。
+HERO_H = 96         # 顶部天幕（不含底部化开区）
+NAV_H = 44
+RAIL_H = 30
 
 # ---- 动效时长（毫秒）------------------------------------------------------
 D_PAGE = 340        # 页面切换
@@ -157,8 +160,8 @@ QLabel#NavMeta {{
 QPushButton#NavGhost {{
     background: transparent; border: 1px solid transparent;
     color: rgba(255, 255, 255, 76%);
-    font-size: 13px; font-weight: 600;
-    padding: 5px 16px; min-height: 16px; border-radius: 14px;
+    font-size: 12.5px; font-weight: 600;
+    padding: 4px 14px; min-height: 16px; border-radius: 13px;
 }}
 QPushButton#NavGhost:hover {{
     background: rgba(255, 255, 255, 14%);
