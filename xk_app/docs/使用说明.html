@@ -6,832 +6,1374 @@
 <title>学校选课助手 · 使用说明</title>
 <style>
 /* ==========================================================================
-   视觉语言取自 espaciolanube.com，但只保留它的**关系**（深色底 → 玻璃 → 大字），
-   配色是淡紫系统：
-     1. 深色夜空打底，全局彩色只有淡紫一系（主色 #6F5CAD）
-     2. 眉标（小 / 淡）压在大标题（大 / 700 / 负字距）之上
-     3. 胶囊几何：按钮、标签、导航一律全圆角；卡片大圆角
-     4. 有影才有层次：分层柔投影 + 1px 淡描边，投影也偏紫
-     5. 大留白：整页留白按 rem 走，模块间距 100px 起
+   使用说明 —— 翻页式演示稿
+   ==========================================================================
+   和「文档」的区别不只是排版：
+
+     · 一页一屏，翻页而不是滚动；键盘 / 滚轮 / 触摸 / 圆点都能导航
+     · **每页有自己的背景**，都是 CSS/SVG 现画的渐变、网格、弧纹、等高线，
+       没有一张外链图片 —— 装机包里就一个 html 文件，离线也能开
+     · 进入每一页都有：粒子绽开 + 渐变扫过 + 内容逐条浮起
+     · 全屏 canvas 粒子层贯穿所有页，切换时颜色跟着当前页的色调过渡
+
+   配色与程序界面同一套：淡紫 #6F5CAD，夜空 #3A2A6E → #140D2B。
    ========================================================================== */
 
 :root{
-  /* 配色 */
-  --ink:        #191A17;
-  --ink-soft:   #38324A;
-  --muted:      #96929E;
+  --ink:        #1B1926;
+  --ink-2:      #38324A;
+  --muted:      #66626F;
+  --faint:      #96929E;
   --ghost:      #B6B2C0;
-  --dim:        #66626F;
 
-  --bg:         #F4F3F9;   /* 带一点紫的浅灰 */
-  --bg-soft:    #EAE7F2;
-  --surface:    #FFFFFF;
-
-  --primary:    #6F5CAD;   /* 淡紫主色 */
+  --primary:    #6F5CAD;
+  --primary-2:  #8B79C9;
   --primary-d:  #57468C;
   --primary-l:  #E5E0F6;
   --primary-t:  #F5F2FD;
 
-  --sky-1:      #3A2A6E;   /* 夜空（与界面同一套） */
+  --sky-1:      #3A2A6E;
   --sky-2:      #241A4A;
   --sky-3:      #140D2B;
 
+  --accent:     #3D8F6D;
+  --accent-l:   #E6F2EC;
   --warn:       #96681C;
   --warn-l:     #F8F0DF;
   --danger:     #B03A4A;
   --danger-l:   #FAEAEC;
 
   --line:       #E4E1EE;
-  --line-soft:  #EFEDF6;
+  --line-2:     #EFEDF6;
 
-  /* 圆角 */
+  --r-card: 20px;
+  --r-md:   14px;
   --r-pill: 999px;
-  --r-card: 2.2rem;
-  --r-md:   1.6rem;
-  --r-sm:   1rem;
 
-  /* 分层柔投影 —— 纯色平面上没有它就只剩「方块叠方块」。
-     投影也偏紫，否则在淡紫卡片边缘会泛出一圈脏灰。 */
-  --sh-1: 0 1px 2px rgba(38, 28, 74, .04), 0 10px 26px -10px rgba(38, 28, 74, .12);
-  --sh-2: 0 2px 4px rgba(38, 28, 74, .05), 0 18px 40px -14px rgba(38, 28, 74, .18);
-  --sh-glow: 0 10px 28px -8px rgba(12, 8, 30, .55);
+  --sh-1: 0 1px 2px rgba(38,28,74,.04), 0 12px 30px -12px rgba(38,28,74,.16);
+  --sh-2: 0 2px 6px rgba(38,28,74,.05), 0 26px 60px -20px rgba(38,28,74,.26);
 
-  /* 节奏 */
-  --gut: clamp(20px, 4.2vw, 60px);
-  --sec: clamp(64px, 8vw, 104px);
-  --ease: cubic-bezier(.55, 0, .1, 1);
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --dur: .78s;
 
   --font: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
           "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
 }
 
-/* 根字号跟随视口，和参考站同一套算法：1512px 视口下 1rem = 10px，并带下限 */
-html{
-  font-size: clamp(8px, 0.6614vw, 10px);
-  scroll-behavior: smooth;
-}
-@media (prefers-reduced-motion: reduce){ html{ scroll-behavior: auto; } }
-
 *{ box-sizing: border-box; }
-
+html, body{ height: 100%; }
 body{
-  margin: 0;
-  background: var(--bg);
+  margin: 0; overflow: hidden;
+  background: #0F0A22;
   color: var(--ink);
   font-family: var(--font);
-  font-size: max(1.5rem, 15px);
-  line-height: 1.75;
+  font-size: 15px; line-height: 1.7;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- 通用排版 ---------------------------------------------------- */
+/* ---------- 舞台 -------------------------------------------------------- */
+#fx{ position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+#grain{
+  position: fixed; inset: 0; z-index: 2; pointer-events: none; opacity: .5;
+  background-image: radial-gradient(rgba(255,255,255,.14) .5px, transparent .5px);
+  background-size: 3px 3px; mix-blend-mode: overlay;
+}
+.deck{ position: fixed; inset: 0; z-index: 3; }
+
+.slide{
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: clamp(48px, 7vh, 84px) clamp(22px, 5vw, 76px);
+  opacity: 0; visibility: hidden;
+  transform: translateY(34px) scale(.985);
+  transition: opacity var(--dur) var(--ease),
+              transform var(--dur) var(--ease),
+              visibility 0s linear var(--dur);
+}
+.slide.active{
+  opacity: 1; visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+  z-index: 2;
+}
+.slide.prev{ transform: translateY(-30px) scale(.985); }
+
+/* 进场时扫过一层柔光 */
+.slide::after{
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: linear-gradient(105deg, transparent 34%, rgba(255,255,255,.5) 50%, transparent 66%);
+  transform: translateX(-30%);
+}
+.slide.active::after{ animation: sweep 1.15s var(--ease) .1s 1 both; }
+@keyframes sweep{
+  0%{ opacity: 0; transform: translateX(-45%); }
+  35%{ opacity: .85; }
+  100%{ opacity: 0; transform: translateX(45%); }
+}
+
+.inner{
+  position: relative; z-index: 3;
+  width: min(1180px, 94vw);
+  max-height: calc(100vh - 2 * clamp(48px, 7vh, 84px));
+  overflow: auto; overscroll-behavior: contain;
+  padding: 4px 6px 4px 2px;
+  scrollbar-width: thin;
+}
+.inner::-webkit-scrollbar{ width: 8px; }
+.inner::-webkit-scrollbar-thumb{ background: rgba(111,92,173,.28); border-radius: 4px; }
+.inner::-webkit-scrollbar-track{ background: transparent; }
+
+/* ---------- 页头 -------------------------------------------------------- */
+.sh{ margin-bottom: clamp(18px, 2.8vh, 34px); }
 .eyebrow{
-  margin: 0;
-  color: var(--muted);
-  font-size: max(1.3rem, 13px);
-  font-weight: 400;
-  letter-spacing: .06em;
+  margin: 0 0 10px;
+  font-size: 12.5px; font-weight: 700; letter-spacing: .16em;
+  color: var(--primary); text-transform: uppercase;
 }
-h1, h2, h3, h4{ color: var(--ink); margin: 0; }
-h2{
-  font-size: max(2.8rem, 30px);
-  font-weight: 700;
-  letter-spacing: -.02em;
-  line-height: 1.2;
-  margin-top: .6rem;
+.sh h1, .sh h2{
+  margin: 0; font-weight: 700; letter-spacing: -.02em; line-height: 1.14;
 }
+.sh h2{ font-size: clamp(30px, 3.5vw, 46px); color: var(--ink); }
+.sh .sub{
+  margin: 12px 0 0; font-size: clamp(14px, 1.15vw, 16px); color: var(--muted);
+}
+.rule{
+  height: 1px; margin-top: 18px;
+  background: linear-gradient(90deg, var(--primary) 0%, rgba(111,92,173,.25) 26%, var(--line) 62%, transparent 100%);
+}
+
+/* 深色页的页头 */
+.tone-dark .sh h2, .tone-dark .sh h1{ color: rgba(255,255,255,.97); }
+.tone-dark .sh .sub{ color: rgba(255,255,255,.66); }
+.tone-dark .eyebrow{ color: rgba(255,255,255,.62); }
+.tone-dark .rule{
+  background: linear-gradient(90deg, rgba(255,255,255,.5), rgba(255,255,255,.14) 34%, transparent 70%);
+}
+
+/* ---------- 逐条浮起 ---------------------------------------------------- */
+.stag{ opacity: 0; }
+.slide.active .stag{
+  animation: rise .66s var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 52ms + 90ms);
+}
+@keyframes rise{
+  from{ opacity: 0; transform: translateY(22px); filter: blur(6px); }
+  to{ opacity: 1; transform: none; filter: none; }
+}
+/* 兜底：动画被浏览器节流/禁用时直接显示内容。
+   `animation-fill-mode: both` 在动画没跑起来时会一直停在 from（opacity:0），
+   整页就是白的 —— 这个失败模式不能留。由 JS 在 1.8 秒后判断并加上 .reveal。 */
+.slide.reveal .stag{
+  animation: none !important; opacity: 1 !important;
+  transform: none !important; filter: none !important;
+}
+
+/* ---------- 正文元件 ---------------------------------------------------- */
+p{ margin: 0 0 14px; }
 h3{
-  font-size: max(1.8rem, 18px);
-  font-weight: 700;
-  letter-spacing: -.01em;
-  margin: 4rem 0 1rem;
+  margin: 26px 0 10px; font-size: 16.5px; font-weight: 700;
+  letter-spacing: -.01em; color: var(--ink-2);
 }
-p{ margin: 1.4rem 0; }
-strong, b{ font-weight: 700; color: var(--ink); }
+.tone-dark h3{ color: rgba(255,255,255,.9); }
+ul, ol{ margin: 0 0 14px; padding-left: 22px; }
+li{ margin: 6px 0; }
+li::marker{ color: var(--primary-2); }
+b, strong{ font-weight: 700; }
 a{ color: var(--primary); text-decoration: none; }
-a:hover{ text-decoration: underline; text-underline-offset: .25em; }
-small{ color: var(--muted); font-size: max(1.3rem, 13px); line-height: 1.7; }
+small{ color: var(--faint); font-size: 13px; line-height: 1.65; }
 
-ul, ol{ padding-left: 2.4rem; margin: 1.4rem 0; }
-li{ margin: .7rem 0; }
-li::marker{ color: var(--ghost); }
-
-/* ---------- 浮动玻璃胶囊导航（对应参考站顶部那条 nav） ------------------ */
-.nav{
-  position: fixed; inset: 0 0 auto 0; z-index: 50;
-  display: flex; justify-content: center;
-  padding: 1.8rem var(--gut);
-  pointer-events: none;
-}
-.navpill{
-  pointer-events: auto;
-  display: flex; align-items: center; gap: .4rem;
-  max-width: 100%;
-  padding: .5rem .6rem;
-  /*
-    玻璃胶囊用深色而不是白色：它 position:fixed 浮在整页上，
-    页面大部分是浅底 —— 白色玻璃压在浅底上等于没有，白字直接读不出来。
-    深色玻璃在深色 Hero 和浅色正文上都成立（参考站的 nav 也是深色玻璃）。
-  */
-  background: rgba(20, 13, 43, .74);
-  border: 1px solid rgba(255, 255, 255, .15);
-  border-radius: var(--r-pill);
-  backdrop-filter: blur(16px) saturate(1.3);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  box-shadow: 0 10px 30px -10px rgba(12, 8, 30, .6);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.navpill::-webkit-scrollbar{ display: none; }
-.mark{
-  flex: 0 0 auto;
-  width: 3.2rem; height: 3.2rem;
-  display: grid; place-items: center;
-  background: linear-gradient(180deg, #FFFFFF, #E5E0F6);
-  color: var(--primary);
-  border-radius: var(--r-pill);
-  font-size: max(1.4rem, 14px); font-weight: 700;
-  margin-right: .4rem;
-}
-.navpill a{
-  flex: 0 0 auto;
-  color: rgba(255, 255, 255, .74);
-  font-size: max(1.3rem, 13px);
-  font-weight: 600;
-  padding: .6rem 1.4rem;
-  border-radius: var(--r-pill);
-  transition: background .35s var(--ease), color .35s var(--ease);
-}
-.navpill a:hover{
-  background: rgba(255, 255, 255, .14);
-  color: #fff;
-  text-decoration: none;
-}
-
-/* ---------- Hero：深色满幅 + 巨号白字 + 同心弧纹（参考站的开场） -------- */
-.hero{
-  position: relative;
-  padding: clamp(132px, 17vw, 230px) var(--gut) clamp(96px, 11vw, 150px);
-  /* 夜空：三团极光 + 低空辉光叠在竖向渐变上，和界面里的天幕同一套配色。
-     底部用「页面底色逐渐盖上去」（第一层是 alpha 渐变的浅底）化开，
-     直接在深紫和浅底之间插值会在中间调留下一道灰带。 */
-  background:
-    radial-gradient(60% 45% at 30% 18%, rgba(167, 140, 230, .42) 0%, transparent 70%),
-    radial-gradient(55% 40% at 76% 34%, rgba(226, 150, 190, .30) 0%, transparent 72%),
-    radial-gradient(70% 50% at 50% 88%, rgba(120, 110, 220, .34) 0%, transparent 74%),
-    linear-gradient(180deg, rgba(244,243,249,0) 0%, rgba(244,243,249,0) 74%,
-                    rgba(244,243,249,.42) 86%, rgba(244,243,249,.88) 95%,
-                    rgba(244,243,249,1) 100%),
-    linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 58%, var(--sky-3) 100%);
-  color: rgba(255, 255, 255, .96);
-  text-align: center;
-  overflow: hidden;
-}
-/* 同心弧：参考站那种「充气结构」弧线的抽象，也是整页唯一非矩形的装饰 */
-.hero .arcs{
-  position: absolute; inset: 0;
-  width: 100%; height: 100%;
-  pointer-events: none;
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 88%);
-  mask-image: linear-gradient(180deg, #000 0%, #000 58%, transparent 88%);
-}
-/* 顶部柔光，让渐变的顶端亮起来 */
-.hero::before{
-  content: "";
-  position: absolute; inset: 0;
-  background: radial-gradient(90% 70% at 38% -18%,
-              rgba(255,255,255,.16) 0%, rgba(255,255,255,.04) 52%, transparent 100%);
-  pointer-events: none;
-}
-.hero > *{ position: relative; z-index: 1; }
-.hero .arcs{ z-index: 0; }
-.hero .eyebrow{ color: rgba(255, 255, 255, .55); }
-.hero h1{
-  margin: 1.6rem 0 0;
-  font-size: max(4.6rem, 52px);
-  font-weight: 700;
-  letter-spacing: -.028em;
-  line-height: 1.1;
-  color: rgba(255, 255, 255, .97);
-  text-shadow: 0 0 7rem rgba(255, 255, 255, .2);
-}
-.hero .lead{
-  max-width: 74rem;
-  margin: 2.6rem auto 0;
-  color: rgba(255, 255, 255, .64);
-  font-size: max(1.6rem, 16px);
-  line-height: 1.7;
-}
-.pill{
-  display: inline-flex; align-items: center; gap: 1rem;
-  margin-top: 4rem;
-  padding: 1.4rem 2.8rem;
-  border: 1px solid rgba(255, 255, 255, .30);
-  border-radius: var(--r-pill);
-  background: rgba(255, 255, 255, .12);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  color: rgba(255, 255, 255, .96);
-  font-size: max(1.4rem, 14px);
-  font-weight: 700;
-  box-shadow: 0 10px 30px -10px rgba(4, 18, 10, .6),
-              inset 0 1px 0 rgba(255, 255, 255, .18);
-  transition: background .45s var(--ease), border-color .45s var(--ease),
-              transform .45s var(--ease), box-shadow .45s var(--ease);
-}
-.pill:hover{
-  background: rgba(255, 255, 255, .22);
-  border-color: rgba(255, 255, 255, .55);
-  transform: translateY(-2px);
-  box-shadow: 0 16px 36px -10px rgba(4, 18, 10, .68),
-              inset 0 1px 0 rgba(255, 255, 255, .26);
-  text-decoration: none;
-}
-
-/* ---------- 正文区 ------------------------------------------------------ */
-.wrap{
-  max-width: 1040px;
-  margin: 0 auto;
-  padding: 0 var(--gut) clamp(64px, 8vw, 110px);
-}
-section{
-  padding-top: var(--sec);
-  scroll-margin-top: 9rem;
-}
-section > .eyebrow{
-  display: block;
-  padding-bottom: 1.4rem;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: .4rem;
-}
-
-/* ---------- 卡片 -------------------------------------------------------- */
+/* 卡片 */
 .card{
-  background: linear-gradient(180deg, #FFFFFF, #FCFCFB);
-  border: 1px solid rgba(20, 32, 24, .07);
+  position: relative;
+  background: linear-gradient(180deg, #fff, #FCFBFE);
+  border: 1px solid rgba(38,28,74,.07);
   border-radius: var(--r-card);
-  padding: 2.6rem 3rem;
-  margin: 2.4rem 0;
+  padding: 20px 24px; margin: 14px 0;
   box-shadow: var(--sh-1);
 }
-.card > b:first-child, .card > strong:first-child{ display: block; margin-bottom: .6rem; }
-/* 卡片首行的 <b> 已经独占一行了，紧跟的 <br> 会再多顶出一个空行 */
+.card > b:first-child, .card > strong:first-child{ display: block; margin-bottom: 6px; }
 .card > b:first-child + br, .card > strong:first-child + br{ display: none; }
-.card p:first-child{ margin-top: 0; }
-.card p:last-child{ margin-bottom: 0; }
 .card :last-child{ margin-bottom: 0; }
+.card.info, .card.tip{ border-left: 3px solid var(--primary); background: linear-gradient(180deg,#fff,var(--primary-t)); }
+.card.warn{ border-left: 3px solid var(--warn); background: linear-gradient(180deg,#fff,var(--warn-l)); }
+.card.danger{ border-left: 3px solid var(--danger); background: linear-gradient(180deg,#fff,var(--danger-l)); }
 
-/* 提示块：一条 3px 的强调边 + 极淡的同色底 */
-.info, .tip, .warn, .danger{ border-left: 3px solid var(--primary); }
-.info{ background: var(--primary-l); border-color: #DCE5DE; }
-.tip{ background: #F2F7F3; border-color: #DCE5DE; }
-.warn{ background: var(--warn-l); border-color: #EADFC8; border-left-color: var(--warn); }
-.danger{ background: var(--danger-l); border-color: #EDD9D5; border-left-color: var(--danger); }
-
-/* ---------- 目录：一排胶囊链接 ------------------------------------------ */
-.toc{
-  background: linear-gradient(180deg, #FFFFFF, #FCFCFB);
-  border: 1px solid rgba(20, 32, 24, .07);
-  border-radius: var(--r-card);
-  padding: 2.6rem 3rem 2.2rem;
-  margin-top: 4rem;
-  box-shadow: var(--sh-2);
-}
-.toc .toc-label{
-  display: block;
-  color: var(--muted);
-  font-size: max(1.3rem, 13px);
-  letter-spacing: .06em;
-  margin-bottom: 1.6rem;
-}
-.toc ol{
-  list-style: none; padding: 0; margin: 0;
-  display: flex; flex-wrap: wrap; gap: .8rem;
-  counter-reset: toc;
-}
-.toc li{ margin: 0; }
-.toc a{
-  display: inline-flex; align-items: baseline; gap: .8rem;
-  padding: .8rem 1.6rem;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  background: #fff;
-  color: var(--ink-soft);
-  font-size: max(1.35rem, 13.5px);
-  box-shadow: 0 1px 2px rgba(18, 34, 24, .04);
-  transition: background .35s var(--ease), border-color .35s var(--ease),
-              color .35s var(--ease), transform .35s var(--ease),
-              box-shadow .35s var(--ease);
-}
-.toc a::before{
-  counter-increment: toc;
-  content: counter(toc, decimal-leading-zero);
-  color: var(--ghost);
-  font-size: max(1.15rem, 11.5px);
-  font-variant-numeric: tabular-nums;
-}
-.toc a:hover{
-  background: var(--primary-tint, #F1F5F1);
-  border-color: rgba(15, 66, 35, .24);
-  color: var(--primary);
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px -8px rgba(15, 66, 35, .4);
-  text-decoration: none;
-}
-.toc a:hover::before{ color: var(--primary); }
-
-/* ---------- 表格：没有网格线，只有发丝行线 ------------------------------ */
+/* 表格 */
 table{
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: #fff;
-  border: 1px solid rgba(20, 32, 24, .07);
-  border-radius: var(--r-card);
-  overflow: hidden;
-  margin: 2.4rem 0;
-  font-size: max(1.4rem, 14px);
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  background: #fff; border: 1px solid rgba(38,28,74,.07);
+  border-radius: var(--r-card); overflow: hidden;
+  margin: 14px 0; font-size: 13.5px;
   box-shadow: var(--sh-1);
 }
-th, td{
-  padding: 1.5rem 2rem;
-  text-align: left;
-  vertical-align: top;
-  border-bottom: 1px solid var(--line-soft);
-}
+th, td{ padding: 10px 18px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line-2); }
 th{
-  color: var(--muted);
-  font-weight: 600;
-  font-size: max(1.25rem, 12.5px);
-  letter-spacing: .05em;
-  background: #FBFBF9;
+  color: var(--muted); font-weight: 700; font-size: 12px;
+  letter-spacing: .06em; background: #FBFAFE;
 }
 tr:last-child th, tr:last-child td{ border-bottom: none; }
 td b{ color: var(--ink); }
 
-/* ---------- 行内代码 / 代码块 ------------------------------------------ */
 code{
-  background: var(--bg-soft);
-  color: var(--ink-soft);
-  padding: .2em .6em;
-  border-radius: .6rem;
-  font-family: var(--mono);
-  font-size: .88em;
+  background: var(--primary-t); color: var(--primary-d);
+  padding: .16em .55em; border-radius: 6px;
+  font-family: var(--mono); font-size: .88em;
 }
 pre{
-  background: #17102A;
-  color: #D7D6D3;
-  border: 1px solid rgba(255, 255, 255, .08);
-  padding: 2.2rem 2.6rem;
-  border-radius: var(--r-md);
-  overflow-x: auto;
-  font-family: var(--mono);
-  font-size: max(1.3rem, 13px);
-  line-height: 1.75;
-  margin: 1.6rem 0;
-  box-shadow: 0 10px 26px -12px rgba(12, 20, 16, .5);
+  background: #17102A; color: #DAD6E6;
+  border: 1px solid rgba(255,255,255,.08);
+  padding: 18px 22px; border-radius: var(--r-md);
+  overflow-x: auto; font-family: var(--mono);
+  font-size: 12.5px; line-height: 1.7; margin: 14px 0;
+  box-shadow: 0 16px 36px -18px rgba(12,8,30,.6);
 }
-pre code{ background: none; color: inherit; padding: 0; font-size: 1em; }
+pre code{ background: none; color: inherit; padding: 0; }
 
-/* ---------- 步骤：绿色实心序号 + 正文 ---------------------------------- */
-.step{
-  display: flex; gap: 1.8rem; align-items: flex-start;
-  margin: 1.8rem 0;
-}
+/* 步骤：绿色实心序号 */
+.step{ display: flex; gap: 14px; align-items: flex-start; margin: 14px 0; }
 .num{
-  flex: 0 0 auto;
-  width: 3.2rem; height: 3.2rem;
+  flex: 0 0 auto; width: 30px; height: 30px;
   display: grid; place-items: center;
-  background: linear-gradient(180deg, #8B79C9, #6F5CAD);
-  color: #fff;
-  border-radius: var(--r-pill);
-  font-size: max(1.3rem, 13px);
-  font-weight: 700;
-  margin-top: .45rem;
-  box-shadow: 0 6px 16px -6px rgba(111, 92, 173, .6);
+  background: linear-gradient(180deg, var(--primary-2), var(--primary));
+  color: #fff; border-radius: var(--r-pill);
+  font-size: 13px; font-weight: 700; margin-top: 4px;
+  box-shadow: 0 6px 16px -6px rgba(111,92,173,.7);
 }
 .step > div:last-child{ flex: 1 1 auto; min-width: 0; }
-.step pre{ margin: 1.2rem 0 0; }
+.step pre{ margin: 10px 0 0; }
 
-/* ---------- 徽章 -------------------------------------------------------- */
 .badge{
-  display: inline-block;
-  background: var(--primary-l);
-  color: var(--primary);
-  padding: .3rem 1.2rem;
+  display: inline-block; background: var(--primary-l); color: var(--primary-d);
+  padding: 3px 12px; border-radius: var(--r-pill);
+  font-size: 12.5px; font-weight: 700; margin-right: 6px; white-space: nowrap;
+}
+
+/* 两列 */
+.cols{ display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+.cols-3{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 880px){
+  .cols, .cols-3{ grid-template-columns: 1fr; }
+}
+.kpi{
+  background: #fff; border: 1px solid rgba(38,28,74,.07);
+  border-radius: var(--r-card); padding: 20px 22px; box-shadow: var(--sh-1);
+}
+.kpi .k{ font-size: 26px; font-weight: 700; color: var(--primary); letter-spacing: -.02em; }
+.kpi .l{ font-size: 12.5px; color: var(--faint); margin-top: 4px; }
+
+/* 深色页里的卡片 */
+.tone-dark .card, .tone-dark table, .tone-dark .kpi{
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 20px 50px -24px rgba(0,0,0,.6);
+  color: rgba(255,255,255,.88);
+}
+.tone-dark th{ background: rgba(255,255,255,.06); color: rgba(255,255,255,.62); }
+.tone-dark td{ color: rgba(255,255,255,.86); }
+.tone-dark th, .tone-dark td{ border-bottom-color: rgba(255,255,255,.1); }
+.tone-dark td b, .tone-dark .card > b{ color: #fff; }
+.tone-dark code{ background: rgba(255,255,255,.12); color: #E5E0F6; }
+.tone-dark .badge{ background: rgba(255,255,255,.15); color: #fff; }
+.tone-dark li::marker{ color: rgba(255,255,255,.5); }
+
+/* ==========================================================================
+   每页的背景 —— 全部现画，没有一张外链图片
+   ========================================================================== */
+.bg{ position: absolute; inset: 0; z-index: 0; overflow: hidden; }
+.bg::before, .bg::after{ content: ""; position: absolute; inset: -20%; }
+
+/* 1. 夜空：极光 + 星点（封面 / 结语 / 隐私） */
+.bg-night{
+  background:
+    radial-gradient(58% 44% at 28% 16%, rgba(167,140,230,.5), transparent 70%),
+    radial-gradient(52% 40% at 78% 30%, rgba(226,150,190,.3), transparent 72%),
+    radial-gradient(66% 48% at 52% 86%, rgba(120,110,220,.4), transparent 74%),
+    linear-gradient(180deg, var(--sky-1) 0%, var(--sky-2) 56%, var(--sky-3) 100%);
+}
+.bg-night::before{
+  background-image: radial-gradient(rgba(255,255,255,.9) 1px, transparent 1.4px);
+  background-size: 190px 170px; opacity: .5;
+  animation: starDrift 90s linear infinite;
+}
+@keyframes starDrift{ to{ transform: translate3d(-190px, 170px, 0); } }
+
+/* 2. 淡紫网格渐变（亮） */
+.bg-mesh{
+  background:
+    radial-gradient(46% 40% at 16% 12%, rgba(167,140,230,.42), transparent 68%),
+    radial-gradient(42% 36% at 84% 20%, rgba(226,150,190,.3), transparent 70%),
+    radial-gradient(54% 46% at 62% 92%, rgba(120,110,220,.3), transparent 72%),
+    linear-gradient(155deg, #FCFBFF 0%, #F3EFFB 46%, #E8E3F6 100%);
+}
+.bg-mesh::before{
+  background-image:
+    repeating-linear-gradient(90deg, rgba(111,92,173,.07) 0 1px, transparent 1px 64px),
+    repeating-linear-gradient(0deg, rgba(111,92,173,.06) 0 1px, transparent 1px 64px);
+  animation: pan 34s linear infinite;
+}
+@keyframes pan{ to{ transform: translate3d(-64px, -64px, 0); } }
+
+/* 3. 同心弧纹（亮） */
+.bg-arcs{
+  background:
+    radial-gradient(70% 60% at 50% 118%, rgba(167,140,230,.4), transparent 66%),
+    linear-gradient(180deg, #FBFAFF 0%, #F0ECFA 60%, #E6E0F5 100%);
+}
+.bg-arcs::before{
+  inset: 0;
+  background:
+    repeating-radial-gradient(circle at 50% 128%,
+      rgba(111,92,173,.20) 0 1px, transparent 1px 62px);
+  animation: breathe 16s ease-in-out infinite;
+}
+@keyframes breathe{ 0%,100%{ opacity: .75; } 50%{ opacity: 1; } }
+
+/* 4. 等高线 / 波纹 */
+.bg-waves{
+  background:
+    radial-gradient(60% 50% at 20% 84%, rgba(120,110,220,.28), transparent 68%),
+    linear-gradient(200deg, #FDFCFF 0%, #F2EEFB 52%, #E9E3F7 100%);
+}
+.bg-waves::before{
+  inset: 0;
+  background:
+    repeating-radial-gradient(ellipse 120% 70% at 12% 108%,
+      rgba(111,92,173,.16) 0 1px, transparent 1px 46px);
+  animation: sway 22s ease-in-out infinite;
+}
+@keyframes sway{
+  0%,100%{ transform: translate3d(0,0,0) }
+  50%{ transform: translate3d(-2%, 1.5%, 0) }
+}
+
+/* 5. 点阵 + 柔光 */
+.bg-grid{
+  background:
+    radial-gradient(52% 44% at 78% 16%, rgba(226,150,190,.3), transparent 70%),
+    radial-gradient(58% 46% at 22% 82%, rgba(167,140,230,.36), transparent 70%),
+    linear-gradient(160deg, #FCFBFF 0%, #F1EDFA 50%, #E7E1F6 100%);
+}
+.bg-grid::before{
+  background-image: radial-gradient(rgba(111,92,173,.26) 1.2px, transparent 1.6px);
+  background-size: 30px 30px;
+  animation: pan 26s linear infinite reverse;
+}
+
+/* 6. 斜条纹 / 布纹 */
+.bg-diag{
+  background:
+    radial-gradient(48% 40% at 84% 78%, rgba(120,110,220,.32), transparent 70%),
+    radial-gradient(44% 36% at 14% 18%, rgba(167,140,230,.34), transparent 70%),
+    linear-gradient(210deg, #FDFCFF 0%, #F2EEFB 58%, #E8E2F6 100%);
+}
+.bg-diag::before{
+  background-image: repeating-linear-gradient(58deg,
+    rgba(111,92,173,.10) 0 1px, transparent 1px 22px);
+  animation: pan 40s linear infinite;
+}
+
+/* 7. 柔光穹顶（亮，底部亮） */
+.bg-dome{
+  background:
+    radial-gradient(88% 66% at 50% 126%, rgba(255,255,255,.95), transparent 62%),
+    radial-gradient(58% 48% at 18% 10%, rgba(167,140,230,.42), transparent 68%),
+    radial-gradient(50% 42% at 86% 24%, rgba(226,150,190,.3), transparent 70%),
+    linear-gradient(180deg, #EDE8F8 0%, #F6F3FC 48%, #FCFBFF 100%);
+}
+.bg-dome::before{
+  inset: 0;
+  background: repeating-radial-gradient(circle at 50% 140%,
+    rgba(111,92,173,.16) 0 1px, transparent 1px 74px);
+  animation: breathe 20s ease-in-out infinite;
+}
+
+/* 8. 深色极光（隐私页） */
+.bg-aurora{
+  background:
+    radial-gradient(70% 40% at 20% 22%, rgba(160,120,235,.55), transparent 68%),
+    radial-gradient(60% 34% at 82% 40%, rgba(226,140,200,.34), transparent 70%),
+    radial-gradient(80% 44% at 50% 96%, rgba(110,150,240,.34), transparent 72%),
+    linear-gradient(190deg, #1E1546 0%, #150E30 58%, #0C081F 100%);
+}
+.bg-aurora::before{
+  inset: -30% -10%;
+  background: conic-gradient(from 210deg at 42% 30%,
+    rgba(167,140,230,.20), transparent 26%, rgba(226,150,190,.16) 46%, transparent 68%,
+    rgba(120,110,220,.2) 84%, transparent 100%);
+  filter: blur(28px);
+  animation: spin 60s linear infinite;
+}
+@keyframes spin{ to{ transform: rotate(360deg); } }
+
+/* 9. 深色星云（结语） */
+.bg-nebula{
+  background:
+    radial-gradient(56% 44% at 74% 22%, rgba(180,120,220,.46), transparent 70%),
+    radial-gradient(62% 48% at 24% 78%, rgba(110,130,235,.44), transparent 72%),
+    linear-gradient(170deg, #241A50 0%, #170F33 60%, #0B0719 100%);
+}
+.bg-nebula::before{
+  background-image: radial-gradient(rgba(255,255,255,.85) 1px, transparent 1.4px);
+  background-size: 140px 130px; opacity: .45;
+  animation: starDrift 70s linear infinite;
+}
+
+/* ==========================================================================
+   导航
+   ========================================================================== */
+.progress{
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 40;
+  background: rgba(255,255,255,.10);
+}
+.progress i{
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--primary-2), #E296BE, var(--primary-2));
+  box-shadow: 0 0 16px rgba(167,140,230,.85);
+  transition: width .55s var(--ease);
+}
+
+.brandbar{
+  position: fixed; top: 22px; left: 30px; z-index: 40;
+  display: flex; align-items: center; gap: 11px;
+  mix-blend-mode: normal;
+}
+.brandbar .mark{
+  width: 34px; height: 34px; border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  background: linear-gradient(180deg, #fff, var(--primary-l));
+  color: var(--primary); font-weight: 700; font-size: 15px;
+  box-shadow: var(--sh-1);
+}
+.brandbar .name{ font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.brandbar .ver{ font-size: 12px; color: var(--faint); margin-left: 7px; }
+.tone-dark .brandbar .name{ color: rgba(255,255,255,.94); }
+.tone-dark .brandbar .ver{ color: rgba(255,255,255,.55); }
+
+.dots{
+  position: fixed; right: 26px; top: 50%; transform: translateY(-50%);
+  z-index: 40; display: flex; flex-direction: column; gap: 10px;
+}
+.dots button{
+  width: 9px; height: 9px; padding: 0; border: none; cursor: pointer;
   border-radius: var(--r-pill);
-  font-size: max(1.25rem, 12.5px);
-  font-weight: 600;
-  margin-right: .6rem;
-  white-space: nowrap;
+  background: rgba(111,92,173,.28);
+  transition: all .4s var(--ease); position: relative;
+}
+.dots button:hover{ background: rgba(111,92,173,.6); transform: scale(1.25); }
+.dots button.on{
+  background: var(--primary); height: 26px;
+  box-shadow: 0 0 12px rgba(111,92,173,.7);
+}
+.tone-dark .dots button{ background: rgba(255,255,255,.3); }
+.tone-dark .dots button.on{ background: #fff; box-shadow: 0 0 14px rgba(255,255,255,.8); }
+.dots button span{
+  position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+  white-space: nowrap; font-size: 12px; font-weight: 600;
+  padding: 4px 10px; border-radius: 8px;
+  background: rgba(20,13,43,.9); color: #fff;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+}
+.dots button:hover span{ opacity: 1; }
+
+.arrows{
+  position: fixed; right: 26px; bottom: 26px; z-index: 40;
+  display: flex; gap: 10px; align-items: center;
+}
+.arrows button{
+  width: 44px; height: 44px; cursor: pointer;
+  border-radius: var(--r-pill); border: 1px solid rgba(38,28,74,.12);
+  background: rgba(255,255,255,.72);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  color: var(--ink-2); font-size: 18px; line-height: 1;
+  box-shadow: var(--sh-1);
+  transition: transform .3s var(--ease), background .3s var(--ease);
+}
+.arrows button:hover{ transform: translateY(-2px); background: #fff; }
+.arrows button:disabled{ opacity: .35; cursor: default; transform: none; }
+.tone-dark .arrows button{
+  background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: #fff;
+}
+.tone-dark .arrows button:hover{ background: rgba(255,255,255,.22); }
+.counter{
+  font-size: 12.5px; font-weight: 700; color: var(--faint);
+  font-variant-numeric: tabular-nums; margin-right: 4px;
+}
+.tone-dark .counter{ color: rgba(255,255,255,.6); }
+
+.hint{
+  position: fixed; left: 30px; bottom: 28px; z-index: 40;
+  font-size: 12px; color: var(--faint);
+}
+.tone-dark .hint{ color: rgba(255,255,255,.5); }
+.hint kbd{
+  font-family: var(--font); font-size: 11px; font-weight: 700;
+  padding: 2px 6px; border-radius: 5px;
+  background: rgba(111,92,173,.12); border: 1px solid rgba(111,92,173,.2);
+  color: var(--primary-d);
+}
+.tone-dark .hint kbd{ background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.2); color: #fff; }
+
+/* 封面专属 */
+.cover{ text-align: center; }
+.cover .sh h1{ font-size: clamp(40px, 6vw, 76px); }
+.cover .lead{
+  max-width: 62ch; margin: 20px auto 0;
+  font-size: clamp(15px, 1.35vw, 18px); color: rgba(255,255,255,.68);
+}
+.cover .pill{
+  display: inline-flex; align-items: center; gap: 10px;
+  margin-top: 34px; padding: 14px 30px; cursor: pointer;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(255,255,255,.32);
+  background: rgba(255,255,255,.13);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  color: #fff; font-size: 14.5px; font-weight: 700;
+  box-shadow: 0 18px 40px -16px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.24);
+  transition: transform .4s var(--ease), background .4s var(--ease);
+}
+.cover .pill:hover{ transform: translateY(-3px); background: rgba(255,255,255,.24); }
+.cover .meta{
+  margin-top: 40px; display: flex; gap: 30px; justify-content: center;
+  flex-wrap: wrap; color: rgba(255,255,255,.55); font-size: 13px;
+}
+.cover .meta b{ display: block; color: #fff; font-size: 22px; letter-spacing: -.02em; }
+
+/* 目录页的小卡 */
+.tocgrid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.tocgrid a{
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 13px 18px; border-radius: var(--r-md);
+  background: #fff; border: 1px solid rgba(38,28,74,.07);
+  color: var(--ink-2); font-size: 13.5px; font-weight: 600;
+  box-shadow: var(--sh-1);
+  transition: transform .35s var(--ease), box-shadow .35s var(--ease), color .35s;
+}
+.tocgrid a:hover{
+  transform: translateY(-3px); box-shadow: var(--sh-2); color: var(--primary);
+}
+.tocgrid a i{
+  font-style: normal; font-size: 11.5px; font-weight: 700;
+  color: var(--ghost); font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 页脚：与 Hero 呼应的深色收尾 -------------------------------- */
-footer{
-  background: #0A1710;
-  color: rgba(255, 255, 255, .58);
-  padding: clamp(56px, 7vw, 96px) var(--gut) clamp(48px, 6vw, 80px);
-  font-size: max(1.35rem, 13.5px);
-  line-height: 1.9;
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+     transition-duration: .01ms !important; }
+  #fx{ display: none; }
+  .stag{ opacity: 1; }
 }
-.footinner{ max-width: 1040px; margin: 0 auto; }
-footer .eyebrow{ color: rgba(255, 255, 255, .42); }
-footer h4{
-  color: rgba(255, 255, 255, .96);
-  font-size: max(2.2rem, 24px);
-  font-weight: 700;
-  letter-spacing: -.02em;
-  margin: 1rem 0 1.6rem;
-}
-footer .fine{
-  margin-top: 3.2rem; padding-top: 2.4rem;
-  border-top: 1px solid rgba(255, 255, 255, .12);
-  color: rgba(255, 255, 255, .42);
-}
-
 @media (max-width: 720px){
-  .card, .toc{ padding: 2.2rem 2rem; }
-  th, td{ padding: 1.2rem 1.4rem; }
-  .wrap{ padding-left: var(--gut); padding-right: var(--gut); }
-  /* 窄屏上表格整体横向滚动，而不是把列挤成一团 */
-  table{ display: block; overflow: auto; }
+  .brandbar{ left: 16px; top: 16px; }
+  .brandbar .ver{ display: none; }
+  .dots{ right: 12px; }
+  .dots button span{ display: none; }
+  .arrows{ right: 14px; bottom: 14px; }
+  .hint{ display: none; }
+  table{ display: block; overflow-x: auto; }
   th, td{ min-width: 9rem; }
 }
 </style>
 </head>
 <body>
 
-<!-- ================= 浮动玻璃胶囊导航 ================= -->
-<nav class="nav">
-  <div class="navpill">
-    <span class="mark">清</span>
-    <a href="#what">功能范围</a>
-    <a href="#install">安装卸载</a>
-    <a href="#login">登录</a>
-    <a href="#mode">运行模式</a>
-    <a href="#courses">预定课程</a>
-    <a href="#run">启动</a>
-    <a href="#privacy">隐私安全</a>
-    <a href="#detect">访问频率</a>
-    <a href="#problem">故障排查</a>
-    <a href="#faq">常见问题</a>
-  </div>
-</nav>
+<canvas id="fx"></canvas>
+<div id="grain"></div>
 
-<!-- ================= Hero ================= -->
-<header class="hero">
-  <svg class="arcs" viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice"
-       aria-hidden="true" focusable="false">
-    <g fill="none" stroke="rgba(255,255,255,.085)" stroke-width="1">
-      <ellipse cx="600" cy="1120" rx="1320" ry="560"/>
-      <ellipse cx="600" cy="1120" rx="1120" ry="475"/>
-      <ellipse cx="600" cy="1120" rx="930"  ry="395"/>
-      <ellipse cx="600" cy="1120" rx="755"  ry="320"/>
-      <ellipse cx="600" cy="1120" rx="595"  ry="252"/>
-      <ellipse cx="600" cy="1120" rx="450"  ry="191"/>
-      <ellipse cx="600" cy="1120" rx="318"  ry="135"/>
-      <ellipse cx="600" cy="1120" rx="198"  ry="84"/>
-    </g>
-  </svg>
-  <p class="eyebrow">XK HELPER · v0.3.0</p>
-  <h1>学校选课助手</h1>
-  <p class="lead">自动盯课余量、按预定时间抢课 —— 全程用真实浏览器操作，不做任何脚本化请求</p>
-  <a class="pill" href="#what">开始阅读</a>
-</header>
+<div class="progress"><i id="bar"></i></div>
 
-<div class="wrap">
-
-<!-- ================= 目录 ================= -->
-<div class="toc">
-  <span class="toc-label">目录</span>
-  <ol>
-    <li><a href="#what">功能范围</a></li>
-    <li><a href="#install">安装与卸载</a></li>
-    <li><a href="#login">第一步：登录</a></li>
-    <li><a href="#mode">第二步：选择运行模式</a></li>
-    <li><a href="#courses">第三步：预定课程</a></li>
-    <li><a href="#run">第四步：确认并启动</a></li>
-    <li><a href="#during">运行期间的注意事项</a></li>
-    <li><a href="#privacy">隐私与安全</a></li>
-    <li><a href="#detect">请求特征与访问频率</a></li>
-    <li><a href="#problem">故障排查</a></li>
-    <li><a href="#faq">常见问题</a></li>
-  </ol>
+<div class="brandbar">
+  <span class="mark">清</span>
+  <span>
+    <span class="name">学校选课助手</span>
+    <span class="ver">v0.3.0</span>
+  </span>
 </div>
 
-<!-- ================= 1 ================= -->
-<section id="what">
-  <p class="eyebrow">1 · 功能范围</p>
-  <h2>功能范围</h2>
+<div class="dots" id="dots"></div>
 
-  <p>按设定的节奏反复检查目标课程有没有课余量，一旦发现就（必要时先退掉占位的课）立刻提交选课。程序<b>不</b>决定选什么课，也<b>不</b>提高中签率 —— 它解决的是"别人退课的那一瞬间人不在电脑前"这个问题。</p>
+<div class="arrows">
+  <span class="counter" id="counter">1 / 18</span>
+  <button id="prev" title="上一页（←）">‹</button>
+  <button id="next" title="下一页（→）">›</button>
+</div>
 
-  <table>
-    <tr><th>支持</th><th>不支持</th></tr>
-    <tr>
-      <td>
-        · 按时间点自动开始选课<br>
-        · 长期监听课余量，发现即抢<br>
-        · 抢课前自动退掉冲突或让位的课<br>
-        · 抢不到时自动把退掉的课选回来<br>
-        · 会话过期后自动重新登录
-      </td>
-      <td>
-        · 在报名 / 抽签阶段插队（该阶段本来就不是先到先得）<br>
-        · 绕过系统的任何限制<br>
-        · 在程序未运行时继续监听
-      </td>
-    </tr>
-  </table>
+<div class="hint"><kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 下一页 · <kbd>Home</kbd> 回封面</div>
 
-  <div class="card info">
-    <b>程序是如何操作页面的？</b><br>
-    程序内置一个真实的 Chromium 浏览器，所有动作 —— 登录打密码、点页签、填课程名、勾选课程、点提交 —— 都是在这个浏览器里<b>以真实鼠标键盘事件</b>完成的，不发送任何脚本化的后台请求。轮询间隔也是随机浮动的，不是固定节拍。
+<div class="deck" id="deck">
+
+<!-- ===================== 01 封面 ===================== -->
+<section class="slide tone-dark cover active" data-bg="night" data-title="封面">
+  <div class="bg bg-night"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">XK HELPER · v0.3.0</p>
+      <h1 class="stag" style="--i:1">学校选课助手</h1>
+      <p class="lead stag" style="--i:2">自动盯课余量、按预定时间抢课 —— 全程用真实浏览器操作，不做任何脚本化请求</p>
+    </div>
+    <div class="stag" style="--i:3">
+      <button class="pill" id="start">开始阅读 →</button>
+    </div>
+    <div class="meta stag" style="--i:4">
+      <span><b>5</b>个步骤</span>
+      <span><b>3</b>种运行模式</span>
+      <span><b>0</b>条脚本化请求</span>
+    </div>
   </div>
 </section>
 
-<!-- ================= 2 ================= -->
-<section id="install">
-  <p class="eyebrow">2 · 安装与卸载</p>
-  <h2>安装与卸载</h2>
-
-  <div class="step"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.3.0.exe</code>，一路下一步。</div></div>
-  <div class="step"><div class="num">2</div><div>装完会自动创建开始菜单和桌面快捷方式。</div></div>
-
-  <p><small>安装目录约 650 MB —— 里面有一整个 Chromium，所以比较大。默认装在 <code>%LOCALAPPDATA%\Programs\XkHelper</code>，不需要管理员权限。</small></p>
-
-  <p><b>卸载</b>：从开始菜单或「设置 → 应用」里卸载即可。</p>
-
-  <div class="card warn">
-    <b>卸载不会删除账号密码和日志。</b>它们单独放在 <code>%LOCALAPPDATA%\XkHelper</code>。
-    要彻底清理，先卸载，再手动删掉那个文件夹。
+<!-- ===================== 02 目录 ===================== -->
+<section class="slide tone-light" data-bg="mesh" data-title="目录">
+  <div class="bg bg-mesh"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">CONTENTS</p>
+      <h2 class="stag" style="--i:1">目录</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+    <div class="tocgrid">
+      <a href="#" data-go="2"  class="stag" style="--i:3"><i>01</i>功能范围</a>
+      <a href="#" data-go="3"  class="stag" style="--i:4"><i>02</i>安装与卸载</a>
+      <a href="#" data-go="4"  class="stag" style="--i:5"><i>03</i>第一步：登录</a>
+      <a href="#" data-go="5"  class="stag" style="--i:6"><i>04</i>第二步：选择运行模式</a>
+      <a href="#" data-go="6"  class="stag" style="--i:7"><i>05</i>第三步：预定课程</a>
+      <a href="#" data-go="7"  class="stag" style="--i:8"><i>05</i>运行设置</a>
+      <a href="#" data-go="8"  class="stag" style="--i:9"><i>06</i>第四步：确认并启动</a>
+      <a href="#" data-go="9"  class="stag" style="--i:10"><i>07</i>运行期间的注意事项</a>
+      <a href="#" data-go="10" class="stag" style="--i:11"><i>08</i>隐私与安全</a>
+      <a href="#" data-go="11" class="stag" style="--i:12"><i>08.5</i>浏览器指纹</a>
+      <a href="#" data-go="12" class="stag" style="--i:13"><i>08.5</i>请求节奏与访问日志</a>
+      <a href="#" data-go="13" class="stag" style="--i:14"><i>09</i>故障排查</a>
+      <a href="#" data-go="14" class="stag" style="--i:15"><i>09</i>常见症状</a>
+      <a href="#" data-go="15" class="stag" style="--i:16"><i>10</i>常见问题（上）</a>
+      <a href="#" data-go="16" class="stag" style="--i:17"><i>10</i>常见问题（下）</a>
+      <a href="#" data-go="17" class="stag" style="--i:18"><i>—</i>结语与免责</a>
+    </div>
   </div>
 </section>
 
-<!-- ================= 3 ================= -->
-<section id="login">
-  <p class="eyebrow">3 · 第一步</p>
-  <h2>第一步：登录</h2>
+<!-- ===================== 03 功能范围 ===================== -->
+<section class="slide tone-light" data-bg="arcs" data-title="功能范围">
+  <div class="bg bg-arcs"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">01 · 功能范围</p>
+      <h2 class="stag" style="--i:1">功能范围</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+    <p class="stag" style="--i:3">按设定的节奏反复检查目标课程有没有课余量，一旦发现就（必要时先退掉占位的课）立刻提交选课。程序<b>不</b>决定选什么课，也<b>不</b>提高中签率 —— 它解决的是"别人退课的那一瞬间人不在电脑前"这个问题。</p>
 
-  <p>使用学校统一身份认证的学号和密码，即 info.tsinghua.edu.cn 所用的那一套。</p>
+    <table class="stag" style="--i:4">
+      <tr><th>支持</th><th>不支持</th></tr>
+      <tr>
+        <td>
+          · 按时间点自动开始选课<br>
+          · 长期监听课余量，发现即抢<br>
+          · 抢课前自动退掉冲突或让位的课<br>
+          · 抢不到时自动把退掉的课选回来<br>
+          · 会话过期后自动重新登录
+        </td>
+        <td>
+          · 在报名 / 抽签阶段插队（该阶段本来就不是先到先得）<br>
+          · 绕过系统的任何限制<br>
+          · 在程序未运行时继续监听
+        </td>
+      </tr>
+    </table>
 
-  <div class="card tip">
-    <b>建议勾选「信任此浏览器」</b> —— 登录会话过期后可免密码自动重登，无需手动干预。
-  </div>
-
-  <h3>「记住密码」是怎么保存的</h3>
-  <p>用 Windows 自带的 DPAPI 加密后存在本机，密钥由系统按<b>当前用户 + 当前电脑</b>派生：</p>
-  <ul>
-    <li>换个 Windows 账户登录同一台电脑 → 解不开</li>
-    <li>把文件拷到别的电脑 → 解不开</li>
-    <li>全程明文不落盘；日志里的密码、学号、Cookie 都会被自动打码成 <code>***</code></li>
-  </ul>
-  <p>不需要保存则不勾选，每次手动输入。已保存过的，点登录页底部的 <b>「清除本机已保存的账号密码」</b>，它会分两步询问：仅清除密码（浏览器信任状态保留），或连同浏览器身份一起重置（会触发二次验证，不可逆）。</p>
-</section>
-
-<!-- ================= 4 ================= -->
-<section id="mode">
-  <p class="eyebrow">4 · 第二步</p>
-  <h2>第二步：选择运行模式</h2>
-
-  <p><b>对照下表选择：</b></p>
-
-  <table>
-    <tr><th>当前情况</th><th>选哪个</th><th>程序会做什么</th></tr>
-    <tr>
-      <td>选课还没开始<br><small>（现在投了也要等抽签）</small></td>
-      <td><span class="badge">模式一</span></td>
-      <td>填学校通知里的开始时间。程序提前开始盯「当前选课阶段」，一变成正选/补退选（先到先得）就自动选课</td>
-    </tr>
-    <tr>
-      <td>选课马上开始<br>而且手上有课要让位</td>
-      <td><span class="badge">模式二</span></td>
-      <td>填开始时间 + 要退的课。到点先退课再抢；抢不到自动把退掉的课选回来</td>
-    </tr>
-    <tr>
-      <td>选课进行中<br>目标课没余量，想蹲别人退课</td>
-      <td><span class="badge">模式三</span></td>
-      <td>长期后台监听，可设平均间隔（最长 1 小时）。发现余量立刻抢</td>
-    </tr>
-  </table>
-
-  <div class="card info">
-    <b>三种模式的请求节奏不同，这是有意设计的：</b><br>
-    · 模式一 / 三 —— 慢节奏，间隔随机长尾、偶发延长、夜间静默<br>
-    · 模式二 —— 等待期间慢节奏，<b>提交瞬间全速</b>
+    <div class="card info stag" style="--i:5">
+      <b>程序是如何操作页面的？</b><br>
+      程序内置一个真实的 Chromium 浏览器，所有动作 —— 登录打密码、点页签、填课程名、勾选课程、点提交 —— 都是在这个浏览器里<b>以真实鼠标键盘事件</b>完成的，不发送任何脚本化的后台请求。轮询间隔也是随机浮动的，不是固定节拍。
+    </div>
   </div>
 </section>
 
-<!-- ================= 5 ================= -->
-<section id="courses">
-  <p class="eyebrow">5 · 第三步</p>
-  <h2>第三步：预定课程</h2>
+<!-- ===================== 04 安装与卸载 ===================== -->
+<section class="slide tone-light" data-bg="waves" data-title="安装与卸载">
+  <div class="bg bg-waves"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">02 · 安装与卸载</p>
+      <h2 class="stag" style="--i:1">安装与卸载</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <p>左边填课程信息，填够能<b>唯一定位到一门课</b>即可，不用全填。</p>
+    <div class="step stag" style="--i:3"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.3.0.exe</code>，一路下一步。</div></div>
+    <div class="step stag" style="--i:4"><div class="num">2</div><div>装完会自动创建开始菜单和桌面快捷方式。</div></div>
 
-  <table>
-    <tr><th>字段</th><th>说明</th></tr>
-    <tr><td>用途</td><td>「要抢的课」或「要退的课」。退的课会去已选列表里找，不必去课程库里搜</td></tr>
-    <tr><td>课程种类</td><td>必修课 / 限选课 / 任选课 / 体育课 / 重修课</td></tr>
-    <tr><td>课程名</td><td><b>最常用的一项</b>，可以只填它</td></tr>
-    <tr><td>任课教师</td><td>选填，用来在多个课堂里区分</td></tr>
-    <tr><td>上课时间</td><td>选填，格式 <code>4-1</code> 表示星期四第 1 大节</td></tr>
-    <tr><td>课程号 / 课序号</td><td>选填，有的话定位最准也最快</td></tr>
-  </table>
+    <p class="stag" style="--i:5"><small>安装目录约 650 MB —— 里面有一整个 Chromium，所以比较大。默认装在 <code>%LOCALAPPDATA%\Programs\XkHelper</code>，不需要管理员权限。</small></p>
 
-  <p>点「添加到清单」后，程序会<b>自动去教务系统查证</b>：</p>
-  <ul>
-    <li>✅ <b>已定位</b> —— 找到了，右侧卡片显示课程号、课序号、上课时间、任课教师、当前课余量</li>
-    <li>⚠️ <b>需补充</b> —— 同名课程有多个课堂，会列出各自的时间，需补课序号或上课时间</li>
-    <li>⚠️ <b>时间冲突</b> —— 和已选课程撞时间，卡片会标红并写明和哪门课冲突</li>
-    <li>❌ <b>未找到</b> —— 课程号 / 课程名可能有误，或本学期未开设该课</li>
-  </ul>
+    <p class="stag" style="--i:5"><b>卸载</b>：从开始菜单或「设置 → 应用」里卸载即可。</p>
 
-  <h3>运行设置</h3>
-  <table>
-    <tr><th>项</th><th>说明</th></tr>
-    <tr><td>开始选课时间</td><td>模式一 / 二必填，填学校通知里的时间</td></tr>
-    <tr><td>提前盯梢</td><td>比开始时间早多少秒开始盯着，默认 60 秒</td></tr>
-    <tr><td>平均监听间隔</td><td>多久查一次。模式三可以设很大，比如 <code>3600</code> 秒 = 1 小时查一次</td></tr>
-    <tr><td>学期</td><td><b>登录后自动识别</b>，也能手动切到别的学期</td></tr>
-    <tr><td>夜间静默</td><td>01:00~06:00 不发送任何请求（该时段基本无人退课）</td></tr>
-    <tr><td>试运行</td><td>勾上则只监听、不实际提交。想先观察几天就勾它</td></tr>
-  </table>
-
-  <div class="card tip">
-    清单里所有「要抢的课」都校验通过后，「下一步」才会亮起。
+    <div class="card warn stag" style="--i:6">
+      <b>卸载不会删除账号密码和日志。</b>它们单独放在 <code>%LOCALAPPDATA%\XkHelper</code>。
+      要彻底清理，先卸载，再手动删掉那个文件夹。
+    </div>
   </div>
 </section>
 
-<!-- ================= 6 ================= -->
-<section id="run">
-  <p class="eyebrow">6 · 第四步</p>
-  <h2>第四步：确认并启动</h2>
+<!-- ===================== 05 第一步：登录 ===================== -->
+<section class="slide tone-light" data-bg="grid" data-title="第一步：登录">
+  <div class="bg bg-grid"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">03 · 第一步</p>
+      <h2 class="stag" style="--i:1">第一步：登录</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <p>确认页会显示：<b>将在什么时间开始监听</b>、要抢哪些课、要不要先退课、夜间静默是否开启。</p>
+    <p class="stag" style="--i:3">使用学校统一身份认证的学号和密码，即 info.tsinghua.edu.cn 所用的那一套。</p>
 
-  <div class="card danger">
-    <b>点「开始运行」之后：</b>
-    <ol style="margin:8px 0 0">
-      <li><b>不要关闭本程序</b> —— 关闭即等于停止抢课。可以最小化。</li>
-      <li><b>浏览器窗口可以随时关掉</b> —— 关闭后程序会自动将其转为后台运行并继续工作，
-        不会中断，也不会重新弹出窗口。</li>
-      <li><b>计算机不能进入睡眠</b> —— 合盖、休眠都会让监听暂停。建议接上电源。</li>
-    </ol>
+    <div class="card tip stag" style="--i:4">
+      <b>建议勾选「信任此浏览器」</b> —— 登录会话过期后可免密码自动重登，无需手动干预。
+    </div>
+
+    <h3 class="stag" style="--i:5">「记住密码」是怎么保存的</h3>
+    <p class="stag" style="--i:6">用 Windows 自带的 DPAPI 加密后存在本机，密钥由系统按<b>当前用户 + 当前电脑</b>派生：</p>
+    <ul class="stag" style="--i:7">
+      <li>换个 Windows 账户登录同一台电脑 → 解不开</li>
+      <li>把文件拷到别的电脑 → 解不开</li>
+      <li>全程明文不落盘；日志里的密码、学号、Cookie 都会被自动打码成 <code>***</code></li>
+    </ul>
+    <p class="stag" style="--i:8">不需要保存则不勾选，每次手动输入。已保存过的，点登录页底部的 <b>「清除本机已保存的账号密码」</b>，它会分两步询问：仅清除密码（浏览器信任状态保留），或连同浏览器身份一起重置（会触发二次验证，不可逆）。</p>
   </div>
 </section>
 
-<!-- ================= 7 ================= -->
-<section id="during">
-  <p class="eyebrow">7 · 运行期间</p>
-  <h2>运行期间的注意事项</h2>
+<!-- ===================== 06 第二步：选择运行模式 ===================== -->
+<section class="slide tone-light" data-bg="diag" data-title="第二步：选择运行模式">
+  <div class="bg bg-diag"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">04 · 第二步</p>
+      <h2 class="stag" style="--i:1">第二步：选择运行模式</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <h3>监控页包含哪些信息</h3>
-  <ul>
-    <li><b>状态灯</b>：准备中 / 等待开始 / 监听中 / 正在抢课 / 已完成</li>
-    <li><b>四个统计</b>：已轮询次数、距下次检查、已运行时长、已抢到几门</li>
-    <li><b>目标课程</b>：每门课当前的实时课余量</li>
-    <li><b>运行日志</b>：每一次检查、每一次决定都有记录</li>
-  </ul>
+    <p class="stag" style="--i:3"><b>对照下表选择：</b></p>
 
-  <h3>程序自动处理的事项</h3>
-  <ul>
-    <li><b>登录过期</b> —— 自动重新登录，约几秒钟，轮询不中断</li>
-    <li><b>抢课中途掉线</b> —— 先重登再继续</li>
-    <li><b>抢不到</b> —— 如果为了抢它退掉了别的课，会自动把退掉的课选回来</li>
-    <li><b>选课阶段尚未开放</b> —— 会一直等到开放为止</li>
-  </ul>
+    <table class="stag" style="--i:4">
+      <tr><th>当前情况</th><th>选哪个</th><th>程序会做什么</th></tr>
+      <tr>
+        <td>选课还没开始<br><small>（现在投了也要等抽签）</small></td>
+        <td><span class="badge">模式一</span></td>
+        <td>填学校通知里的开始时间。程序提前开始盯「当前选课阶段」，一变成正选/补退选（先到先得）就自动选课</td>
+      </tr>
+      <tr>
+        <td>选课马上开始<br>而且手上有课要让位</td>
+        <td><span class="badge">模式二</span></td>
+        <td>填开始时间 + 要退的课。到点先退课再抢；抢不到自动把退掉的课选回来</td>
+      </tr>
+      <tr>
+        <td>选课进行中<br>目标课没余量，想蹲别人退课</td>
+        <td><span class="badge">模式三</span></td>
+        <td>长期后台监听，可设平均间隔（最长 1 小时）。发现余量立刻抢</td>
+      </tr>
+    </table>
 
-  <h3>抢到之后</h3>
-  <p>会响铃、写日志。默认继续保留低频确认；也可以在确认页设置成抢到就自动退出。</p>
+    <div class="card info stag" style="--i:5">
+      <b>三种模式的请求节奏不同，这是有意设计的：</b><br>
+      · 模式一 / 三 —— 慢节奏，间隔随机长尾、偶发延长、夜间静默<br>
+      · 模式二 —— 等待期间慢节奏，<b>提交瞬间全速</b>
+    </div>
+  </div>
 </section>
 
-<!-- ================= 8 ================= -->
-<section id="privacy">
-  <p class="eyebrow">8 · 隐私与安全</p>
-  <h2>隐私与安全</h2>
+<!-- ===================== 07 第三步：预定课程 ===================== -->
+<section class="slide tone-light" data-bg="dome" data-title="第三步：预定课程">
+  <div class="bg bg-dome"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">05 · 第三步</p>
+      <h2 class="stag" style="--i:1">第三步：预定课程</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <table>
-    <tr><th>项目</th><th>怎么保护的</th></tr>
-    <tr><td>账号密码</td><td>Windows DPAPI 加密存储，绑定当前用户 + 当前电脑；明文不落盘</td></tr>
-    <tr><td>日志</td><td>密码、学号、Cookie、密文都自动打码成 <code>***</code>，写进日志前就替换掉了</td></tr>
-    <tr><td>诊断包</td><td>导出时自动脱敏，不含账号密码，可以放心发给别人协助排查</td></tr>
-    <tr><td>网络</td><td>只和学校的选课系统通信，不向任何第三方发送数据</td></tr>
-  </table>
+    <p class="stag" style="--i:3">左边填课程信息，填够能<b>唯一定位到一门课</b>即可，不用全填。</p>
 
-  <p>程序的数据都在 <code>%LOCALAPPDATA%\XkHelper\</code>：</p>
-  <pre>config.json          设置（不含账号密码）
+    <div class="cols">
+      <table class="stag" style="--i:4">
+        <tr><th>字段</th><th>说明</th></tr>
+        <tr><td>用途</td><td>「要抢的课」或「要退的课」。退的课会去已选列表里找，不必去课程库里搜</td></tr>
+        <tr><td>课程种类</td><td>必修课 / 限选课 / 任选课 / 体育课 / 重修课</td></tr>
+        <tr><td>课程名</td><td><b>最常用的一项</b>，可以只填它</td></tr>
+        <tr><td>任课教师</td><td>选填，用来在多个课堂里区分</td></tr>
+        <tr><td>上课时间</td><td>选填，格式 <code>4-1</code> 表示星期四第 1 大节</td></tr>
+        <tr><td>课程号 / 课序号</td><td>选填，有的话定位最准也最快</td></tr>
+      </table>
+
+      <div>
+        <p class="stag" style="--i:5">点「添加到清单」后，程序会<b>自动去教务系统查证</b>：</p>
+        <ul class="stag" style="--i:6">
+          <li>✅ <b>已定位</b> —— 找到了，右侧卡片显示课程号、课序号、上课时间、任课教师、当前课余量</li>
+          <li>⚠️ <b>需补充</b> —— 同名课程有多个课堂，会列出各自的时间，需补课序号或上课时间</li>
+          <li>⚠️ <b>时间冲突</b> —— 和已选课程撞时间，卡片会标红并写明和哪门课冲突</li>
+          <li>❌ <b>未找到</b> —— 课程号 / 课程名可能有误，或本学期未开设该课</li>
+        </ul>
+        <div class="card tip stag" style="--i:7">
+          清单里所有「要抢的课」都校验通过后，「下一步」才会亮起。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 08 运行设置 ===================== -->
+<section class="slide tone-light" data-bg="mesh" data-title="运行设置">
+  <div class="bg bg-mesh"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">05 · 运行设置</p>
+      <h2 class="stag" style="--i:1">运行设置</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <table class="stag" style="--i:3">
+      <tr><th>项</th><th>说明</th></tr>
+      <tr><td>开始选课时间</td><td>模式一 / 二必填，填学校通知里的时间</td></tr>
+      <tr><td>提前盯梢</td><td>比开始时间早多少秒开始盯着，默认 60 秒</td></tr>
+      <tr><td>平均监听间隔</td><td>多久查一次。模式三可以设很大，比如 <code>3600</code> 秒 = 1 小时查一次</td></tr>
+      <tr><td>学期</td><td><b>登录后自动识别</b>，也能手动切到别的学期</td></tr>
+      <tr><td>夜间静默</td><td>01:00~06:00 不发送任何请求（该时段基本无人退课）</td></tr>
+      <tr><td>试运行</td><td>勾上则只监听、不实际提交。想先观察几天就勾它</td></tr>
+    </table>
+
+    <div class="cols-3">
+      <div class="kpi stag" style="--i:4"><div class="k">60″</div><div class="l">提前盯梢默认值</div></div>
+      <div class="kpi stag" style="--i:5"><div class="k">3600″</div><div class="l">模式三可设的最大间隔（1 小时）</div></div>
+      <div class="kpi stag" style="--i:6"><div class="k">01:00–06:00</div><div class="l">夜间静默：完全不发请求</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 09 第四步：确认并启动 ===================== -->
+<section class="slide tone-light" data-bg="grid" data-title="第四步：确认并启动">
+  <div class="bg bg-grid"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">06 · 第四步</p>
+      <h2 class="stag" style="--i:1">第四步：确认并启动</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <p class="stag" style="--i:3">确认页会显示：<b>将在什么时间开始监听</b>、要抢哪些课、要不要先退课、夜间静默是否开启。</p>
+
+    <div class="card danger stag" style="--i:4">
+      <b>点「开始运行」之后：</b>
+      <ol style="margin:8px 0 0">
+        <li><b>不要关闭本程序</b> —— 关闭即等于停止抢课。可以最小化。</li>
+        <li><b>浏览器窗口可以随时关掉</b> —— 关闭后程序会自动将其转为后台运行并继续工作，
+          不会中断，也不会重新弹出窗口。</li>
+        <li><b>计算机不能进入睡眠</b> —— 合盖、休眠都会让监听暂停。建议接上电源。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 10 运行期间的注意事项 ===================== -->
+<section class="slide tone-light" data-bg="arcs" data-title="运行期间">
+  <div class="bg bg-arcs"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">07 · 运行期间</p>
+      <h2 class="stag" style="--i:1">运行期间的注意事项</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <h3 class="stag" style="--i:3">监控页包含哪些信息</h3>
+        <ul class="stag" style="--i:4">
+          <li><b>状态灯</b>：准备中 / 等待开始 / 监听中 / 正在抢课 / 已完成</li>
+          <li><b>四个统计</b>：已轮询次数、距下次检查、已运行时长、已抢到几门</li>
+          <li><b>目标课程</b>：每门课当前的实时课余量</li>
+          <li><b>运行日志</b>：每一次检查、每一次决定都有记录</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="stag" style="--i:5">程序自动处理的事项</h3>
+        <ul class="stag" style="--i:6">
+          <li><b>登录过期</b> —— 自动重新登录，约几秒钟，轮询不中断</li>
+          <li><b>抢课中途掉线</b> —— 先重登再继续</li>
+          <li><b>抢不到</b> —— 如果为了抢它退掉了别的课，会自动把退掉的课选回来</li>
+          <li><b>选课阶段尚未开放</b> —— 会一直等到开放为止</li>
+        </ul>
+        <div class="card tip stag" style="--i:7">
+          <b>抢到之后</b>：会响铃、写日志。默认继续保留低频确认；也可以在确认页设置成抢到就自动退出。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 11 隐私与安全（深色） ===================== -->
+<section class="slide tone-dark" data-bg="aurora" data-title="隐私与安全">
+  <div class="bg bg-aurora"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">08 · 隐私与安全</p>
+      <h2 class="stag" style="--i:1">隐私与安全</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <table class="stag" style="--i:3">
+      <tr><th>项目</th><th>怎么保护的</th></tr>
+      <tr><td>账号密码</td><td>Windows DPAPI 加密存储，绑定当前用户 + 当前电脑；明文不落盘</td></tr>
+      <tr><td>日志</td><td>密码、学号、Cookie、密文都自动打码成 <code>***</code>，写进日志前就替换掉了</td></tr>
+      <tr><td>诊断包</td><td>导出时自动脱敏，不含账号密码，可以放心发给别人协助排查</td></tr>
+      <tr><td>网络</td><td>只和学校的选课系统通信，不向任何第三方发送数据</td></tr>
+    </table>
+
+    <p class="stag" style="--i:4">程序的数据都在 <code>%LOCALAPPDATA%\XkHelper\</code>：</p>
+    <pre class="stag" style="--i:5">config.json          设置（不含账号密码）
 credentials.dat      账号密码（DPAPI 加密）
 logs\                运行日志
 browser_profile\     浏览器登录态
 diagnostics\         导出的诊断包</pre>
+  </div>
 </section>
 
-<!-- ================= 8.5 ================= -->
-<section id="detect">
-  <p class="eyebrow">8.5 · 请求特征与访问频率</p>
-  <h2>请求特征与访问频率</h2>
+<!-- ===================== 12 浏览器指纹 ===================== -->
+<section class="slide tone-light" data-bg="diag" data-title="浏览器指纹">
+  <div class="bg bg-diag"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">08.5 · 请求特征</p>
+      <h2 class="stag" style="--i:1">浏览器指纹</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <p>分三个层面说明。</p>
+    <p class="stag" style="--i:3">程序使用<b>真实 Chromium 浏览器</b>，不是脚本模拟的 HTTP 请求。实测对照：</p>
 
-  <h3>浏览器指纹</h3>
-  <p>程序使用<b>真实 Chromium 浏览器</b>，不是脚本模拟的 HTTP 请求。实测对照：</p>
-  <table>
-    <tr><th>检测点</th><th>脚本化 HTTP 请求</th><th>本程序</th></tr>
-    <tr><td>TLS 指纹</td><td>Python 库的指纹</td><td>真实 Chromium 的指纹</td></tr>
-    <tr><td>请求头</td><td>缺少 sec-ch-ua 等一整套</td><td>浏览器原生请求头</td></tr>
-    <tr><td><code>navigator.webdriver</code></td><td><code>true</code></td><td>已处理</td></tr>
-    <tr><td>插件列表 / <code>window.chrome</code></td><td>空 / 缺失</td><td>正常</td></tr>
-    <tr><td>WebGL 渲染器</td><td>无</td><td>真实显卡</td></tr>
-    <tr><td>点击事件 <code>isTrusted</code></td><td><code>false</code></td><td><code>true</code>（真实鼠标事件）</td></tr>
-  </table>
+    <table class="stag" style="--i:4">
+      <tr><th>检测点</th><th>脚本化 HTTP 请求</th><th>本程序</th></tr>
+      <tr><td>TLS 指纹</td><td>Python 库的指纹</td><td>真实 Chromium 的指纹</td></tr>
+      <tr><td>请求头</td><td>缺少 sec-ch-ua 等一整套</td><td>浏览器原生请求头</td></tr>
+      <tr><td><code>navigator.webdriver</code></td><td><code>true</code></td><td>已处理</td></tr>
+      <tr><td>插件列表 / <code>window.chrome</code></td><td>空 / 缺失</td><td>正常</td></tr>
+      <tr><td>WebGL 渲染器</td><td>无</td><td>真实显卡</td></tr>
+      <tr><td>点击事件 <code>isTrusted</code></td><td><code>false</code></td><td><code>true</code>（真实鼠标事件）</td></tr>
+    </table>
 
-  <div class="card tip">
-    <b>默认使用「可见窗口」模式</b>，此时程序就是一台正常的浏览器，由真实显卡渲染。
-    改为无头（后台）模式时程序会做相应处理，但真实窗口始终更接近常态。
+    <div class="card tip stag" style="--i:5">
+      <b>默认使用「可见窗口」模式</b>，此时程序就是一台正常的浏览器，由真实显卡渲染。
+      改为无头（后台）模式时程序会做相应处理，但真实窗口始终更接近常态。
+    </div>
   </div>
-
-  <h3>请求节奏</h3>
-  <ul>
-    <li>轮询间隔<b>随机浮动</b>，不是固定周期，并带长尾停顿</li>
-    <li>相邻两次间隔不会雷同，取值区间连续（不留下"永远取不到"的空档）</li>
-    <li>鼠标沿轨迹移动，输入逐字键入</li>
-    <li>01:00~06:00 <b>不发送任何请求</b></li>
-  </ul>
-
-  <h3>访问日志</h3>
-  <div class="card warn">
-    <p style="margin-top:0">无论客户端特征如何，<b>服务器访问日志中仍会记录</b>：某个会话每隔一段时间访问同一个页面，持续数小时甚至数天。</p>
-    <p style="margin-bottom:0">这不是客户端能处理的问题，而是<b>访问频率</b>问题。可控的手段只有：把间隔设在合理范围、开启夜间静默、不要长时间不间断运行。</p>
-  </div>
-
-  <h3>使用建议</h3>
-  <p>建议把监听间隔设在正常范围、开启夜间静默、抢到即停，不要做长时间高频轮询。请自觉遵守学校相关规定。</p>
 </section>
 
-<!-- ================= 9 ================= -->
-<section id="problem">
-  <p class="eyebrow">9 · 故障排查</p>
-  <h2>故障排查</h2>
+<!-- ===================== 13 请求节奏与访问日志 ===================== -->
+<section class="slide tone-light" data-bg="waves" data-title="请求节奏与访问日志">
+  <div class="bg bg-waves"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">08.5 · 节奏与日志</p>
+      <h2 class="stag" style="--i:1">请求节奏与访问日志</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <div class="step"><div class="num">1</div><div><b>先看日志。</b>监控页右下角有「打开日志」，或直接去 <code>%LOCALAPPDATA%\XkHelper\logs\</code>。每一条都带时间戳。</div></div>
-  <div class="step"><div class="num">2</div><div><b>跑一次自检。</b>在安装目录按住 Shift 右键 → 「在此处打开 PowerShell」，然后执行：<pre>.\XkHelper.exe --selftest</pre>它会检查浏览器能不能启动、能不能连上学校网络。结论直接写在屏幕上，同时也进日志。</div></div>
-  <div class="step"><div class="num">3</div><div><b>导出诊断包。</b>监控页右上角「导出诊断包」，会打包日志 + 环境信息（已脱敏）。</div></div>
+    <div class="cols">
+      <div>
+        <h3 class="stag" style="--i:3">请求节奏</h3>
+        <ul class="stag" style="--i:4">
+          <li>轮询间隔<b>随机浮动</b>，不是固定周期，并带长尾停顿</li>
+          <li>相邻两次间隔不会雷同，取值区间连续（不留下"永远取不到"的空档）</li>
+          <li>鼠标沿轨迹移动，输入逐字键入</li>
+          <li>01:00~06:00 <b>不发送任何请求</b></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="stag" style="--i:5">访问日志</h3>
+        <div class="card warn stag" style="--i:6">
+          <p style="margin-top:0">无论客户端特征如何，<b>服务器访问日志中仍会记录</b>：某个会话每隔一段时间访问同一个页面，持续数小时甚至数天。</p>
+          <p style="margin-bottom:0">这不是客户端能处理的问题，而是<b>访问频率</b>问题。可控的手段只有：把间隔设在合理范围、开启夜间静默、不要长时间不间断运行。</p>
+        </div>
+      </div>
+    </div>
 
-  <h3>常见症状</h3>
-  <table>
-    <tr><th>症状</th><th>可能原因 / 处理</th></tr>
-    <tr><td>一直卡在「正在登录…」</td><td>网络不通，或密码错误。跑 <code>--selftest</code> 看结论；确认密码能正常登录 info.tsinghua.edu.cn</td></tr>
-    <tr><td>要求图形验证码 / 二次验证</td><td><b>在本程序的登录页内完成，全程只有一个窗口</b>：<br>
+    <div class="card info stag" style="--i:7">
+      <b>使用建议</b><br>
+      建议把监听间隔设在正常范围、开启夜间静默、抢到即停，不要做长时间高频轮询。请自觉遵守学校相关规定。
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 14 故障排查 ===================== -->
+<section class="slide tone-light" data-bg="dome" data-title="故障排查">
+  <div class="bg bg-dome"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">09 · 故障排查</p>
+      <h2 class="stag" style="--i:1">故障排查</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <div class="step stag" style="--i:3"><div class="num">1</div><div><b>先看日志。</b>监控页右下角有「打开日志」，或直接去 <code>%LOCALAPPDATA%\XkHelper\logs\</code>。每一条都带时间戳。</div></div>
+    <div class="step stag" style="--i:4"><div class="num">2</div><div><b>跑一次自检。</b>在安装目录按住 Shift 右键 → 「在此处打开 PowerShell」，然后执行：<pre>.\XkHelper.exe --selftest</pre>它会检查浏览器能不能启动、能不能连上学校网络。结论直接写在屏幕上，同时也进日志。</div></div>
+    <div class="step stag" style="--i:5"><div class="num">3</div><div><b>导出诊断包。</b>监控页右上角「导出诊断包」，会打包日志 + 环境信息（已脱敏）。</div></div>
+  </div>
+</section>
+
+<!-- ===================== 15 常见症状 ===================== -->
+<section class="slide tone-light" data-bg="mesh" data-title="常见症状">
+  <div class="bg bg-mesh"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">09 · 常见症状</p>
+      <h2 class="stag" style="--i:1">常见症状</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <table class="stag" style="--i:3">
+      <tr><th>症状</th><th>可能原因 / 处理</th></tr>
+      <tr><td>一直卡在「正在登录…」</td><td>网络不通，或密码错误。跑 <code>--selftest</code> 看结论；确认密码能正常登录 info.tsinghua.edu.cn</td></tr>
+      <tr><td>要求图形验证码 / 二次验证</td><td><b>在本程序的登录页内完成，全程只有一个窗口</b>：<br>
 ① 选择验证码发到哪（手机短信 / 企业微信）<br>
 ② 输入收到的 6 位验证码（<b>3 分钟内有效</b>，没收到可点「重新发送」）<br>
 ③ 学校会问「是否把本设备登记为信任设备」—— 选<b>「是」则 180 天内本机再登录都不用验证码</b>（会话过期自动重登也不会被拦），选「否」则下次仍需验证码。程序会列出选项与后果<br>
 图形验证码的图片会直接显示在这块区域里；万一程序认不出验证页面，会先询问是否打开浏览器窗口<br>
-<b>注意</b>：这和第 3 节登录页上那个「信任此浏览器」勾选框是两回事 —— 那个是学校的「统一登录」开关（免输账号密码），<b>不等于免验证码</b></td></tr>
-    <tr><td>提示「票据校验失败」</td><td>短时间登录太频繁被风控。等几分钟再试</td></tr>
-    <tr><td>课程校验显示「未找到」</td><td>检查课程号 / 课程名；也可能这门课本学期没开</td></tr>
-    <tr><td>一直显示「暂无余量」</td><td>正常，就是没人退课。可以继续等待，或把间隔调小</td></tr>
-    <tr><td>抢课时提示「只能选一门」</td><td>已有一门体育课。在清单里加一条「要退的课」，把旧的那门填进去</td></tr>
-    <tr><td>窗口显示不全 / 字很小</td><td>窗口可随意拖大；内容放不下会自动出滚动条，不会错位</td></tr>
-  </table>
+<b>注意</b>：这和登录页上那个「信任此浏览器」勾选框是两回事 —— 那个是学校的「统一登录」开关（免输账号密码），<b>不等于免验证码</b></td></tr>
+      <tr><td>提示「票据校验失败」</td><td>短时间登录太频繁被风控。等几分钟再试</td></tr>
+      <tr><td>课程校验显示「未找到」</td><td>检查课程号 / 课程名；也可能这门课本学期没开</td></tr>
+      <tr><td>一直显示「暂无余量」</td><td>正常，就是没人退课。可以继续等待，或把间隔调小</td></tr>
+      <tr><td>抢课时提示「只能选一门」</td><td>已有一门体育课。在清单里加一条「要退的课」，把旧的那门填进去</td></tr>
+      <tr><td>窗口显示不全 / 字很小</td><td>窗口可随意拖大；内容放不下会自动出滚动条，不会错位</td></tr>
+    </table>
+  </div>
 </section>
 
-<!-- ================= 10 ================= -->
-<section id="faq">
-  <p class="eyebrow">10 · 常见问题</p>
-  <h2>常见问题</h2>
+<!-- ===================== 16 常见问题（上） ===================== -->
+<section class="slide tone-light" data-bg="grid" data-title="常见问题（上）">
+  <div class="bg bg-grid"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">10 · 常见问题</p>
+      <h2 class="stag" style="--i:1">常见问题</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <h3>会提高中签率吗？</h3>
-  <p>不会。抽签阶段由系统按教学计划和志愿等级决定，程序改变不了。它只在<b>先到先得</b>的阶段（正选、补退选）有用 —— 帮你抓住别人退课的那一瞬间。</p>
+    <div class="cols">
+      <div class="card stag" style="--i:3">
+        <h3 style="margin-top:0">会提高中签率吗？</h3>
+        <p style="margin-bottom:0">不会。抽签阶段由系统按教学计划和志愿等级决定，程序改变不了。它只在<b>先到先得</b>的阶段（正选、补退选）有用 —— 帮你抓住别人退课的那一瞬间。</p>
+      </div>
+      <div class="card stag" style="--i:4">
+        <h3 style="margin-top:0">能同时抢多门课吗？</h3>
+        <p style="margin-bottom:0">能。清单里加多少门都行，会依次检查、依次抢。</p>
+      </div>
+      <div class="card stag" style="--i:5">
+        <h3 style="margin-top:0">间隔设多小合适？</h3>
+        <p style="margin-bottom:0">默认值即可。设得过小只会增加服务器压力、提高触发风控的概率，并无收益 —— 瓶颈是"有没有人退课"，不是"查得多快"。</p>
+      </div>
+      <div class="card stag" style="--i:6">
+        <h3 style="margin-top:0">为什么夜间要静默？</h3>
+        <p style="margin-bottom:0">凌晨 1 点到 6 点基本没人退课，持续发请求没有意义。这段时间程序不发送任何请求。</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-  <h3>能同时抢多门课吗？</h3>
-  <p>能。清单里加多少门都行，会依次检查、依次抢。</p>
+<!-- ===================== 17 常见问题（下） ===================== -->
+<section class="slide tone-light" data-bg="arcs" data-title="常见问题（下）">
+  <div class="bg bg-arcs"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">10 · 常见问题</p>
+      <h2 class="stag" style="--i:1">常见问题</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
 
-  <h3>间隔设多小合适？</h3>
-  <p>默认值即可。设得过小只会增加服务器压力、提高触发风控的概率，并无收益 —— 瓶颈是"有没有人退课"，不是"查得多快"。</p>
+    <div class="card stag" style="--i:3">
+      <h3 style="margin-top:0">能关掉它打开的浏览器窗口吗？</h3>
+      <p>能。关闭之后程序会自动将其转为后台运行并继续工作，不会中断抢课，也不会重新弹出窗口。需要验证码时，验证码显示在<b>本程序的登录页</b>里，不需要切换到别的窗口。</p>
+      <p style="margin-bottom:0">如果不想让浏览器占用桌面，可以到「运行设置」里取消勾选「显示浏览器窗口」，它就会一直在后台运行。账号密码和「信任此设备」状态都保存在本机，关窗口不会导致重新登录。</p>
+    </div>
 
-  <h3>为什么夜间要静默？</h3>
-  <p>凌晨 1 点到 6 点基本没人退课，持续发请求没有意义。这段时间程序不发送任何请求。</p>
+    <div class="card stag" style="--i:4">
+      <h3 style="margin-top:0">换电脑还能用吗？</h3>
+      <p style="margin-bottom:0">能。安装包是自包含的，拷过去安装即可。但账号密码不会跟着走（DPAPI 绑定机器），需要重新登录一次。</p>
+    </div>
+  </div>
+</section>
 
-  <h3>能关掉它打开的浏览器窗口吗？</h3>
-  <p>能。关闭之后程序会自动将其转为后台运行并继续工作，不会中断抢课，也不会重新弹出窗口。需要验证码时，验证码显示在<b>本程序的登录页</b>里，不需要切换到别的窗口。</p>
-  <p>如果不想让浏览器占用桌面，可以到「运行设置」里取消勾选「显示浏览器窗口」，它就会一直在后台运行。账号密码和「信任此设备」状态都保存在本机，关窗口不会导致重新登录。</p>
-
-  <h3>换电脑还能用吗？</h3>
-  <p>能。安装包是自包含的，拷过去安装即可。但账号密码不会跟着走（DPAPI 绑定机器），需要重新登录一次。</p>
+<!-- ===================== 18 结语 ===================== -->
+<section class="slide tone-dark cover" data-bg="nebula" data-title="结语">
+  <div class="bg bg-nebula"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">XK HELPER</p>
+      <h1 class="stag" style="--i:1">学校选课助手 v0.3.0</h1>
+      <p class="lead stag" style="--i:2">本说明随安装包一起分发</p>
+    </div>
+    <div class="meta stag" style="--i:3">
+      <span><b>仅供本人选课使用</b>请遵守学校相关规定</span>
+      <span><b>合理设置间隔</b>不要给服务器造成压力</span>
+    </div>
+    <div class="stag" style="--i:4">
+      <button class="pill" id="restart">← 回到封面</button>
+    </div>
+  </div>
 </section>
 
 </div>
 
-<footer>
-  <div class="footinner">
-    <p class="eyebrow">XK HELPER</p>
-    <h4>学校选课助手 v0.3.0</h4>
-    <p>本说明随安装包一起分发</p>
-    <p class="fine">仅供本人选课使用，请遵守学校相关规定</p>
-  </div>
-</footer>
+<script>
+(function(){
+  "use strict";
+  var reduce = window.matchMedia &&
+               window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /* ====================================================================
+     一、粒子层
+     全屏 canvas 贯穿所有页。切换页面时：
+       · 粒子颜色向当前页的色调过渡（深色页用白，浅色页用紫）
+       · 触发一次「绽开」——尺寸与透明度短暂抬升，再回落
+     ==================================================================== */
+  var cv = document.getElementById("fx");
+  var ctx = cv.getContext("2d");
+  var W = 0, H = 0, DPR = 1;
+
+  var LIGHT = { r: 111, g: 92,  b: 173 };
+  var DARK  = { r: 214, g: 200, b: 255 };
+
+  var cur = { r: 214, g: 200, b: 255 };
+  var tgt = { r: 214, g: 200, b: 255 };
+  var bloom = 0;          // 0…1，切页瞬间冲到 1 再衰减
+  var ps = [];
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = cv.width  = Math.floor(innerWidth  * DPR);
+    H = cv.height = Math.floor(innerHeight * DPR);
+    cv.style.width  = innerWidth + "px";
+    cv.style.height = innerHeight + "px";
+  }
+
+  function seed(){
+    var n = reduce ? 0 : Math.max(34, Math.min(96, Math.round(innerWidth / 16)));
+    ps = [];
+    for (var i = 0; i < n; i++){
+      ps.push({
+        x: Math.random() * W, y: Math.random() * H,
+        vx: (Math.random() - .5) * .17 * DPR,
+        vy: (Math.random() - .5) * .17 * DPR,
+        r: (Math.random() * 1.7 + .55) * DPR,
+        a: Math.random() * .55 + .3,
+        ph: Math.random() * Math.PI * 2
+      });
+    }
+  }
+
+  function toneFor(slide){
+    var bg = slide ? slide.getAttribute("data-bg") : "night";
+    var dark = (bg === "night" || bg === "aurora" || bg === "nebula");
+    return dark ? DARK : LIGHT;
+  }
+
+  function frame(t){
+    ctx.clearRect(0, 0, W, H);
+    if (!ps.length){ requestAnimationFrame(frame); return; }
+
+    cur.r += (tgt.r - cur.r) * .045;
+    cur.g += (tgt.g - cur.g) * .045;
+    cur.b += (tgt.b - cur.b) * .045;
+    bloom *= .965;
+
+    var link = 132 * DPR;
+    var base = 1 + bloom * .9;
+
+    for (var i = 0; i < ps.length; i++){
+      var p = ps[i];
+      p.x += p.vx; p.y += p.vy;
+      if (p.x < -24) p.x = W + 24; else if (p.x > W + 24) p.x = -24;
+      if (p.y < -24) p.y = H + 24; else if (p.y > H + 24) p.y = -24;
+
+      var tw = .78 + .22 * Math.sin(t / 1400 + p.ph);
+      var r = p.r * base * tw;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, 6.2832);
+      ctx.fillStyle = "rgba(" + (cur.r | 0) + "," + (cur.g | 0) + "," + (cur.b | 0) +
+                      "," + (p.a * tw * (.5 + bloom * .5)).toFixed(3) + ")";
+      ctx.fill();
+    }
+
+    // 近邻连线：粒子之间拉出细线，读起来像星图
+    ctx.lineWidth = DPR * .6;
+    for (var a = 0; a < ps.length; a++){
+      for (var b = a + 1; b < ps.length; b++){
+        var dx = ps[a].x - ps[b].x, dy = ps[a].y - ps[b].y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 > link * link) continue;
+        var al = (1 - Math.sqrt(d2) / link) * .18 * (0.35 + bloom * .65);
+        ctx.strokeStyle = "rgba(" + (cur.r | 0) + "," + (cur.g | 0) + "," + (cur.b | 0) +
+                          "," + al.toFixed(3) + ")";
+        ctx.beginPath();
+        ctx.moveTo(ps[a].x, ps[a].y);
+        ctx.lineTo(ps[b].x, ps[b].y);
+        ctx.stroke();
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  resize(); seed();
+  if (!reduce) requestAnimationFrame(frame);
+  addEventListener("resize", function(){ resize(); seed(); });
+
+  /* ====================================================================
+     二、翻页
+     ==================================================================== */
+  var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+  var dots = document.getElementById("dots");
+  var bar = document.getElementById("bar");
+  var counter = document.getElementById("counter");
+  var btnPrev = document.getElementById("prev");
+  var btnNext = document.getElementById("next");
+  var idx = 0, busy = false;
+
+  // 圆点导航
+  slides.forEach(function(s, i){
+    var b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("aria-label", s.getAttribute("data-title") || ("第 " + (i+1) + " 页"));
+    b.innerHTML = "<span>" + (s.getAttribute("data-title") || "") + "</span>";
+    b.addEventListener("click", function(){ go(i); });
+    dots.appendChild(b);
+  });
+  var dotEls = Array.prototype.slice.call(dots.children);
+
+  function stagger(slide){
+    // 每次进入都重排 --i，让逐条浮起的顺序稳定
+    var els = slide.querySelectorAll(".stag");
+    for (var i = 0; i < els.length; i++) els[i].style.setProperty("--i", i);
+  }
+
+  /* 动画节流 / 被禁用的兜底。
+     浏览器会把后台标签页的 CSS 动画暂停：此时 fill-mode:both 的元素
+     永远停在 opacity:0，切回来看到的是**空白页**。这里 1.8 秒后检查一次，
+     没浮起来就直接显示 —— 宁可没有动画，也不能没有内容。 */
+  function armReveal(slide, ms){
+    clearTimeout(slide._revealTimer);
+    slide._revealTimer = setTimeout(function(){
+      if (!slide.classList.contains("active")) return;
+      if (slide.classList.contains("reveal")) return;
+      var els = slide.querySelectorAll(".stag");
+      for (var i = 0; i < els.length; i++){
+        if (parseFloat(getComputedStyle(els[i]).opacity) < .9){
+          slide.classList.add("reveal");
+          return;
+        }
+      }
+    }, ms || 1800);
+  }
+
+  document.addEventListener("visibilitychange", function(){
+    if (!document.hidden) armReveal(slides[idx], 900);
+  });
+
+  function go(n, silent){
+    if (busy && !silent) return;
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    if (n === idx && slides[idx].classList.contains("active")) {
+      if (!silent) return;
+    }
+    var old = slides[idx];
+    old.classList.remove("active");
+    old.classList.toggle("prev", n > idx);
+
+    idx = n;
+    var s = slides[idx];
+    s.classList.remove("prev");
+    s.classList.remove("reveal");     // 重新播一遍入场，先撤掉兜底
+    stagger(s);
+    // 强制重排，保证动画每次都从头播（连续翻页时不会「吞掉」入场）
+    void s.offsetWidth;
+    s.classList.add("active");
+    armReveal(s);
+
+    document.body.classList.toggle("on-dark", s.classList.contains("tone-dark"));
+    for (var i = 0; i < dotEls.length; i++) dotEls[i].classList.toggle("on", i === idx);
+    bar.style.width = ((idx + 1) / slides.length * 100) + "%";
+    counter.textContent = (idx + 1) + " / " + slides.length;
+    btnPrev.disabled = idx === 0;
+    btnNext.disabled = idx === slides.length - 1;
+
+    tgt = toneFor(s);
+    bloom = 1;                       // 粒子绽开
+    var inner = s.querySelector(".inner");
+    if (inner) inner.scrollTop = 0;
+
+    if (location.hash !== "#p" + (idx + 1)) {
+      try { history.replaceState(null, "", "#p" + (idx + 1)); } catch (e) {}
+    }
+    busy = true;
+    setTimeout(function(){ busy = false; }, reduce ? 60 : 620);
+  }
+
+  function next(){ go(idx + 1); }
+  function prev(){ go(idx - 1); }
+
+  btnNext.addEventListener("click", next);
+  btnPrev.addEventListener("click", prev);
+  var startBtn = document.getElementById("start");
+  if (startBtn) startBtn.addEventListener("click", function(){ go(1); });
+  var restart = document.getElementById("restart");
+  if (restart) restart.addEventListener("click", function(){ go(0); });
+
+  // 目录页的跳转
+  Array.prototype.forEach.call(document.querySelectorAll("[data-go]"), function(a){
+    a.addEventListener("click", function(e){
+      e.preventDefault();
+      go(parseInt(a.getAttribute("data-go"), 10) || 0);
+    });
+  });
+
+  // 键盘
+  addEventListener("keydown", function(e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.repeat) return;          // 按住方向键不要一路飞过去
+    switch (e.key){
+      case "ArrowRight": case "ArrowDown": case "PageDown": case " ": e.preventDefault(); next(); break;
+      case "ArrowLeft":  case "ArrowUp":   case "PageUp":   e.preventDefault(); prev(); break;
+      case "Home": e.preventDefault(); go(0); break;
+      case "End":  e.preventDefault(); go(slides.length - 1); break;
+    }
+  });
+
+  // 滚轮（带节流，避免一次滑动连翻好几页）
+  var wheelLock = 0;
+  addEventListener("wheel", function(e){
+    // 页内还能滚就先让它滚
+    var inner = slides[idx].querySelector(".inner");
+    if (inner && inner.scrollHeight > inner.clientHeight + 4){
+      var atTop = inner.scrollTop <= 0;
+      var atBot = inner.scrollTop + inner.clientHeight >= inner.scrollHeight - 1;
+      if (!(e.deltaY > 0 && atBot) && !(e.deltaY < 0 && atTop)) return;
+    }
+    e.preventDefault();
+    var now = Date.now();
+    if (now - wheelLock < 720) return;
+    if (Math.abs(e.deltaY) < 8) return;
+    wheelLock = now;
+    if (e.deltaY > 0) next(); else prev();
+  }, { passive: false });
+
+  // 触摸
+  var ty = 0, tx = 0;
+  addEventListener("touchstart", function(e){
+    ty = e.touches[0].clientY; tx = e.touches[0].clientX;
+  }, { passive: true });
+  addEventListener("touchend", function(e){
+    var dy = e.changedTouches[0].clientY - ty;
+    var dx = e.changedTouches[0].clientX - tx;
+    if (Math.max(Math.abs(dy), Math.abs(dx)) < 56) return;
+    if (Math.abs(dy) > Math.abs(dx)) { if (dy < 0) next(); else prev(); }
+    else { if (dx < 0) next(); else prev(); }
+  }, { passive: true });
+
+  // 初始位置：支持 #p3 这种深链
+  var m = /^#p(\d+)$/.exec(location.hash || "");
+  go(m ? Math.max(0, Math.min(slides.length - 1, parseInt(m[1], 10) - 1)) : 0, true);
+})();
+</script>
 </body>
 </html>
