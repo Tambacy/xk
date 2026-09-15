@@ -2,7 +2,9 @@
 
 本项目是个人学习项目，与任何高校及其院系没有任何关系，未获授权。
 
-使用自动化工具选课可能违反学校规定，可能导致选课结果被取消、账号受限。全部风险由使用者自行承担，作者不承担任何责任。请确认所在学校允许后再使用，并合理设置监听间隔，不要给服务器造成压力。
+本项目仅供个人学习与技术研究，不得用于真实选课。
+
+使用自动化工具选课可能违反学校规定，可能导致选课结果被取消、账号受限。全部风险由使用者自行承担，作者不承担任何责任。请合理设置监听间隔，不要给服务器造成压力。
 
 禁止商业用途、代抢服务与大规模分发。
 
@@ -45,11 +47,13 @@
 This is a personal study project with **no affiliation whatsoever** with any
 university or its departments, and it is not authorized by them.
 
+**It is provided for personal study and technical research only, and must not be
+used for actual course registration.**
+
 Automating course registration **may violate your school's rules** and could
 result in cancelled registrations or account restrictions. **All risk is borne
-by the user**; the author accepts no liability. Please confirm that your school
-permits this before using it, keep a reasonable polling interval, and do not put
-pressure on the server.
+by the user**; the author accepts no liability. Please keep a reasonable polling
+interval and do not put pressure on the server.
 
 Commercial use, proxy registration services, and mass redistribution are
 prohibited.
