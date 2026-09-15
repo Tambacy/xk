@@ -132,6 +132,22 @@ def same_course(selected, entry) -> bool:
     return False
 
 
+def opposite_entry(entries, entry):
+    """清单里和 entry 指向同一门课、但用途（抢 / 退）相反的那一条。
+
+    同一门课不能既在「要抢」又在「要退」里 —— 那等于先把它退掉、再把它抢回来，
+    运行时真的会照做。用户看到卡片上「又退又抢」只会一头雾水。
+
+    两个入口都要拿它拦：表单里手动加、以及「本学期已选课程」里点「要退」。
+    """
+    for e in entries:
+        if e is entry:
+            continue
+        if e.action != entry.action and same_course(e, entry):
+            return e
+    return None
+
+
 def find_conflicts(target_time: str, others: Iterable[tuple[str, str]]) -> list[str]:
     """判断 target_time 与其它课程时间是否冲突。
 

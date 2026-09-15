@@ -21,6 +21,7 @@ from .motion import ParticleOverlay, RevealCurtain
 from .widgets import HeroBand, LogoMark
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
 from ..browser import COURSE_KINDS
+from ..courses import opposite_entry
 from ..secretstore import SecretStore, redactor
 from ..logging_setup import setup_logging, get_logger, export_diagnostics
 
@@ -359,6 +360,8 @@ class MainWindow(QMainWindow):
                     f"{getattr(c, 'name', '')}（{c.kch}-{c.kxh}）"
                     f"已经在「要退的课」清单里了。")
                 return
+        # 注意：只查「要退」是不够的 —— 它可能已经在「要抢」里
+        # （抢到之后就出现在这个列表里了），交给 on_add_course 统一拦。
         entry = CourseEntry(action="drop", kind=self._kind_for(getattr(c, "kind", "")),
                             kch=getattr(c, "kch", ""), kxh=getattr(c, "kxh", ""),
                             name=getattr(c, "name", ""),
@@ -449,6 +452,24 @@ class MainWindow(QMainWindow):
         return [e for e in self.entries if e.action == "drop"]
 
     def on_add_course(self, entry: CourseEntry):
+        # 同一门课不能既抢又退。用户很容易踩到：先把它加成「要抢」，
+        # 抢到之后它进了「本学期已选课程」，再点那门课的「要退」就重复了 ——
+        # 结果清单里同一门课一条抢、一条退，运行时先退再抢，白折腾。
+        other = opposite_entry(self.entries, entry)
+        if other is not None:
+            want = "要抢的课" if entry.action == "grab" else "要退的课"
+            have = "要退的课" if other.action == "drop" else "要抢的课"
+            if QMessageBox.question(
+                    self, "同一门课不能既抢又退",
+                    f"{entry.label()}\n\n"
+                    f"它已经在「{have}」里了。\n"
+                    f"要把那一条改成「{want}」吗？"
+            ) != QMessageBox.Yes:
+                return
+            # 就地改用途，而不是留下两条
+            self.entries.remove(other)
+            log.info("清单里同一门课用途冲突，改为「%s」：%s", want, entry.label())
+
         self.entries.append(entry)
         self.results[len(self.entries) - 1] = None
         self.cfg.set_courses(self.entries)
@@ -509,9 +530,40 @@ class MainWindow(QMainWindow):
             cfg.start_time = ""
         cfg.set_courses(self.entries)
 
+    def _self_contradictions(self) -> list:
+        """找出清单里「同一门课既抢又退」的条目对。
+
+        这是最后一道闸：哪怕清单是从旧配置读进来的（那时还没有添加时的拦截），
+        也绝不能带着这种自相矛盾的清单开跑 —— 运行时会先把它退掉、再想把它抢回来。
+        """
+        out, seen = [], set()
+        for e in self.entries:
+            other = opposite_entry(self.entries, e)
+            if other is None:
+                continue
+            key = frozenset((id(e), id(other)))     # 同一对只报一次
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append((e, other))
+        return out
+
     def on_start(self):
         cfg = self.cfg
         self._collect_settings()
+
+        bad = self._self_contradictions()
+        if bad:
+            lines = "\n".join(f"· {a.label()}" for a, _ in bad)
+            QMessageBox.warning(
+                self, "清单里有自相矛盾的课程",
+                "下面这些课同时出现在「要抢的课」和「要退的课」里：\n\n"
+                f"{lines}\n\n"
+                "同一门课不能既抢又退 —— 那等于先把它退掉再抢回来。\n"
+                "请到「预定课程」页把其中一条移除。")
+            self.goto(2)
+            return
+
         self.save_config()
 
         self.page_monitor.reset(self.entries)

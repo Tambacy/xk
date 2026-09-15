@@ -291,5 +291,63 @@ app.processEvents()
 assert _card_rows(_mp.card_courses)[0] == "目标课程", "卡片标题丢了"
 print("  卡片标题仍在                    PASS")
 
+# ---------------------------------------------------------------------------
+# 同一门课不能既抢又退
+#
+# 用户报过：目标课程卡片上同一门课一条「退」一条「抢」，两个页面的截图
+# 还互相矛盾 —— 说明清单里真的有两条。
+#
+# 来路：「本学期已选课程」里点「要退」时只查了「要退」有没有重复，
+# 没查它是不是已经在「要抢」里 —— 而抢到之后那门课就会出现在这个列表里。
+# ---------------------------------------------------------------------------
+print()
+print("=" * 60)
+print("清单自相矛盾：同一门课既抢又退")
+print("=" * 60)
+
+from PySide6.QtWidgets import QMessageBox
+from app.browser import SelectedCourse
+
+_asked = []
+_answer = {"v": QMessageBox.Yes}
+# question 和 warning 都要记账 —— 只记 question 的话，
+# 「开跑时被拦住」那条断言会因为 warning 没被记录而假失败。
+QMessageBox.question = staticmethod(lambda *a, **k: (_asked.append(1), _answer["v"])[1])
+QMessageBox.information = staticmethod(lambda *a, **k: (_asked.append(1), None)[1])
+QMessageBox.warning = staticmethod(lambda *a, **k: (_asked.append(1), QMessageBox.Ok)[1])
+
+
+def _mk(action, kch, kxh, name):
+    return CourseEntry(action=action, kind="ty", kch=kch, kxh=kxh, name=name,
+                       resolved=True, resolved_name=name,
+                       resolved_cid=f"2026-2027-1;{kch};{kxh};")
+
+
+win.entries = [_mk("grab", "10721071", "2", "三年级男生乒乓球")]
+win.cfg.set_courses(win.entries)
+_asked.clear()
+_answer["v"] = QMessageBox.Yes
+win.on_drop_requested(SelectedCourse(kind="体育课", kch="10721071", kxh="2",
+                                     name="三年级男生乒乓球", time_text="4-1(全周)",
+                                     del_id="2026-2027-1;10721071;2;"))
+app.processEvents()
+assert len(_asked) == 1, "应当就用途冲突询问用户"
+assert len(win.entries) == 1, f"不该出现同一门课两条：{len(win.entries)}"
+assert win.entries[0].action == "drop", "用途应就地改成「退」，而不是再加一条"
+assert win._self_contradictions() == [], "仍存在自相矛盾的条目"
+print("  点「要退」不会产生重复条目      PASS")
+
+# 旧配置里已经带着矛盾时，开始运行必须被拦住
+win.entries = [_mk("grab", "10721071", "2", "三年级男生乒乓球"),
+               _mk("drop", "10721071", "2", "三年级男生乒乓球")]
+win.cfg.set_courses(win.entries)
+assert len(win._self_contradictions()) == 1, "应当检测到一对矛盾"
+_asked.clear()
+win.on_start()
+app.processEvents()
+assert len(_asked) >= 1, "开始运行时应当弹警告"
+assert win.stack.currentIndex() == 2, "应当退回预定课程页，而不是开始监控"
+print("  带着矛盾开跑会被拦住              PASS")
+
 print()
 print("OK")

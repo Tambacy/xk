@@ -317,6 +317,33 @@ check("确实解析到了文件（自检：别扫了个空）", _parsed > 10, Tr
 
 print()
 print("=" * 78)
+print("【8】同一门课不能既在「要抢」又在「要退」里")
+print("=" * 78)
+# 用户报过：目标课程卡片上同一门课一条「退」一条「抢」。
+# 来路是「本学期已选课程」里点「要退」时，只查了「要退」有没有重复，
+# 没查它是不是已经在「要抢」里（抢到之后它就会出现在那个列表里）。
+from app.courses import opposite_entry
+
+
+def _e(action, kch, kxh, name):
+    return CourseEntry(action=action, kind="ty", kch=kch, kxh=kxh, name=name)
+
+
+_g = _e("grab", "10721071", "2", "三年级男生乒乓球")
+_d = _e("drop", "10721071", "2", "三年级男生乒乓球")
+
+check("抢 vs 同课的退 -> 找得到", opposite_entry([_g], _d) is _g)
+check("退 vs 同课的抢 -> 找得到", opposite_entry([_d], _g) is _d)
+check("同向不算冲突", opposite_entry([_g], _e("grab", "10721071", "2", "乒乓球")), None)
+check("不同课不算冲突", opposite_entry([_g], _e("grab", "10726031", "2", "冰球")), None)
+check("空清单", opposite_entry([], _g), None)
+check("只填课程名也认得出",
+      opposite_entry([_g], _e("drop", "", "", "三年级男生乒乓球")) is _g)
+check("只填课程号也认得出",
+      opposite_entry([_g], _e("drop", "10721071", "", "")) is _g)
+
+print()
+print("=" * 78)
 if FAIL:
     print(f"{FAIL} 项失败")
     sys.exit(1)
