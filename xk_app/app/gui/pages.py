@@ -1253,8 +1253,13 @@ class MonitorPage(QWidget):
             self.st_next.set(f"{left:.0f}s", animate=False)
 
     # 「还在跑」的几个状态：这时不给返回入口，避免用户在抢课中途切走。
-    # stopping 也算在跑 —— 正在收尾时不该跳出「返回设置」。
-    RUNNING_STATES = ("preparing", "waiting", "monitoring", "acting", "stopping")
+    # · stopping 也算在跑 —— 正在收尾时不该跳出「返回设置」
+    # · idle 也算 —— 调度器在 run_inline 里**第一件事**就是推一个 idle
+    #   （浏览器刚起来、还没进入监听），那时候界面正在「正在登录…」
+    RUNNING_STATES = ("idle", "preparing", "waiting", "monitoring", "acting", "stopping")
+
+    # 真正结束的状态：只有这几个才停表，「已运行」冻结在最后一刻
+    TERMINAL_STATES = ("success", "stopped", "error", "done")
 
     def set_state(self, state, title, message=""):
         colors = {
@@ -1276,17 +1281,22 @@ class MonitorPage(QWidget):
         self.btn_stop.setVisible(running)
         self.btn_stop.setEnabled(state != "stopping")
 
-        # 「已运行」只在跑的时候走字；停下就冻结在最后一刻，不再累加
-        if running:
-            if not self._timer.isActive():
-                self._timer.start(1000)
-        else:
+        # 「已运行」的计时。
+        #
+        # ⚠ 这里踩过坑：以前写成「非 running 就停表并把 _t0 清空」，
+        # 而调度器在一轮运行里**第一件事**就是推一个 state=idle
+        # （浏览器刚起来、还没进入监听）—— 于是 `_t0` 被清掉，
+        # 等真正进入 monitoring 时表虽在走、起点却没了，
+        # 「已运行」永远停在 00:00:00。
+        #
+        # 现在只有**真正结束**（success / stopped / error / done）才停表；
+        # `_t0` 只由 reset() 设定，别的状态一律不动它。
+        if state in self.TERMINAL_STATES:
             self._timer.stop()
-            self._t0 = None
             self._next_at = None
-            # 立刻刷一次：计时器已经停了，不主动刷的话「距下次检查」会
-            # 一直停在最后一个数字上，看起来像还在倒计时。
-            self._tick()
+            self._tick()            # 立刻刷一次，把最终值显示出来再冻住
+        elif not self._timer.isActive():
+            self._timer.start(1000)
 
     def update_status(self, s: dict):
         self._last_status = s

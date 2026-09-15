@@ -423,5 +423,68 @@ assert len(_before) == 3, "重复推送让行数增长了"
 print("  重复推送是幂等的                  PASS")
 print("  要退的课不会被串行成抢的课      PASS")
 
+# ---------------------------------------------------------------------------
+# 「已运行」必须真的走字
+#
+# 用户报过：一直停在 00:00:00。
+#
+# 根因是 v0.3.3 里写成「非 running 就停表并把 _t0 清空」，而调度器在一轮运行里
+# **第一件事**就是推一个 state=idle（浏览器刚起来、还没进入监听）——
+# `_t0` 被清掉，等进入 monitoring 时表虽在走、起点却没了。
+#
+# 所以这里必须**按调度器真实的推送顺序**来：idle → preparing → monitoring。
+# 只推 monitoring 是测不出这个 bug 的。
+# ---------------------------------------------------------------------------
+print()
+print("=" * 60)
+print("监控页「已运行」走字")
+print("=" * 60)
+
+
+def _elapsed_status(state, msg):
+    return {"state": state, "message": msg, "polls": 1, "success": [],
+            "next_poll_in": 30.0,
+            "courses": [_status_row("10721071", "2", "三年级男生乒乓球", "4-1(全周)", 0)]}
+
+
+def _pump(sec):
+    import time as _t
+    _end = _t.time() + sec
+    while _t.time() < _end:
+        app.processEvents()
+        _t.sleep(0.02)
+
+
+_m = win.page_monitor
+_m.reset([_grab_p])
+app.processEvents()
+assert _m.st_run.v.text() == "00:00:00", "reset 后应当归零"
+assert _m._timer.isActive(), "reset 后计时器应当在跑"
+
+# 调度器 run_inline 的第一件事就是推 idle
+_m.update_status(_elapsed_status("idle", "正在登录…"))
+app.processEvents()
+assert _m._t0 is not None, "推 idle 把计时起点清掉了"
+assert _m._timer.isActive(), "推 idle 把计时器停掉了"
+
+_m.update_status(_elapsed_status("preparing", "准备中"))
+_m.update_status(_elapsed_status("monitoring", "监听中"))
+app.processEvents()
+_pump(2.3)
+_t1 = _m.st_run.v.text()
+assert _t1 != "00:00:00", f"走了 2.3 秒还是 {_t1}"
+_pump(2.3)
+_t2 = _m.st_run.v.text()
+assert _t2 != _t1, f"没有继续增长：{_t1} -> {_t2}"
+print(f"  走字正常（{_t1} -> {_t2}）           PASS")
+
+_m.update_status(_elapsed_status("stopped", "已停止"))
+app.processEvents()
+_frozen = _m.st_run.v.text()
+assert not _m._timer.isActive(), "停止后计时器应当停"
+_pump(2.2)
+assert _m.st_run.v.text() == _frozen, "停止后仍在累加"
+print("  停止后冻结在最后一刻              PASS")
+
 print()
 print("OK")
