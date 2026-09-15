@@ -7,7 +7,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QTimer, QRect, QPoint
+from PySide6.QtCore import Qt, QTimer, QRect, QPoint, QEvent
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QStackedWidget, QMessageBox, QLabel, QFrame,
@@ -17,7 +17,7 @@ from .core import BrowserCore
 from .pages import LoginPage, ModePage, CoursesPage, ConfirmPage, MonitorPage
 from .theme import stylesheet
 from . import motion
-from .motion import PageCurtain
+from .motion import ParticleOverlay, TurnCurtain
 from .widgets import HeroBand, LogoMark
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
 from ..browser import COURSE_KINDS
@@ -36,7 +36,8 @@ class MainWindow(QMainWindow):
         self.entries: list[CourseEntry] = self.cfg.courses_as_entries()
         self.results: dict[int, dict] = {}
         self.core: BrowserCore | None = None
-        self.curtain: PageCurtain | None = None
+        self.curtain: TurnCurtain | None = None
+        self.particles: ParticleOverlay | None = None
 
         self.setWindowTitle(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
         self.resize(1120, 760)
@@ -100,7 +101,36 @@ class MainWindow(QMainWindow):
         self.page_courses.set_headless(self.cfg.headless)
         if self.cfg.user:
             self._set_user_label(self.cfg.user)
+
+        # 粒子层：盖在内容之上，但不吃鼠标事件（否则按钮全被挡住）
+        self.particles = ParticleOverlay(root)
+        self.particles.setGeometry(root.rect())
+        self.particles.raise_()
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
         self.goto(0)
+
+    # ------------------------------------------------------------------
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.particles is not None:
+            self.particles.setGeometry(self.centralWidget().rect())
+
+    def eventFilter(self, obj, ev):
+        """按钮悬停 / 按下时溅一小簇粒子。
+
+        用应用级事件过滤器而不是逐个按钮 connect —— 页面里的按钮是动态
+        重建的，逐个挂钩会漏。
+        """
+        if self.particles is not None and isinstance(obj, QPushButton):
+            t = ev.type()
+            if t == QEvent.Enter:
+                self.particles.emit_from(obj, 10)
+            elif t == QEvent.MouseButtonPress:
+                self.particles.emit_from(obj, 22)
+        return super().eventFilter(obj, ev)
 
         # 已经有保存的凭据就自动填上
         d = self.store.load()
@@ -133,23 +163,35 @@ class MainWindow(QMainWindow):
         self.page_monitor.open_logs.connect(self.on_open_logs)
         self.page_monitor.export_diag.connect(self.on_export_diag)
 
+    # 每页一种天幕「心情」：五页共用同一张背景的话，翻过去几乎没有
+    # 「换了个地方」的感觉。索引 = 页面索引。
+    SKY_VARIANTS = ["rose", "cool", "warm", "violet", "deep"]
+
     def goto(self, index: int):
         changed = self.stack.currentIndex() != index
-        snap, geo = None, None
+        reverse = changed and index < self.stack.currentIndex()
+        snap_old = snap_new = None
+        geo = None
         if changed and self.isVisible() and motion.ENABLED:
             old = self.stack.currentWidget()
             if old is not None and old.width() > 0 and old.height() > 0:
-                snap = old.grab()
+                snap_old = old.grab()
                 geo = QRect(self.stack.mapTo(self.centralWidget(), QPoint(0, 0)),
                             self.stack.size())
         self.stack.setCurrentIndex(index)
         self.steps.set_current(index)
         # 登录页整屏是天幕品牌分栏，顶上的天幕条会让两片深色撞在一起
         self.band.setVisible(index != 0)
-        if snap is not None:
+        self.band.set_variant(self.SKY_VARIANTS[index % len(self.SKY_VARIANTS)])
+        # 翻页：新页先抓一张快照，和旧页一起交给幕布做滑出 / 滑入
+        if snap_old is not None and motion.ENABLED:
+            cur = self.stack.currentWidget()
+            if cur is not None and cur.width() > 0 and cur.height() > 0:
+                snap_new = cur.grab()
+        if snap_old is not None and snap_new is not None:
             if self.curtain is None:
-                self.curtain = PageCurtain(self.centralWidget())
-            self.curtain.play(snap, geo)
+                self.curtain = TurnCurtain(self.centralWidget())
+            self.curtain.play(snap_old, snap_new, geo, reverse=reverse)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
             self.page_courses.set_headless(self.cfg.headless)

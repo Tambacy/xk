@@ -84,7 +84,7 @@ body{
 .slide{
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  padding: clamp(48px, 7vh, 84px) clamp(22px, 5vw, 76px);
+  padding: clamp(30px, 4.2vh, 58px) clamp(22px, 5vw, 76px) clamp(38px, 5vh, 66px);
   opacity: 0; visibility: hidden;
   transform: translateY(34px) scale(.985);
   transition: opacity var(--dur) var(--ease),
@@ -115,17 +115,22 @@ body{
 .inner{
   position: relative; z-index: 3;
   width: min(1180px, 94vw);
-  max-height: calc(100vh - 2 * clamp(48px, 7vh, 84px));
-  overflow: auto; overscroll-behavior: contain;
-  padding: 4px 6px 4px 2px;
-  scrollbar-width: thin;
+  max-height: 100%;
+  /* 绝不出现滚动条。放不下由 JS 对 .fit 做等比缩放，而不是让用户去滚 ——
+     一页一屏的稿子里滚条是最伤观感的东西。 */
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
 }
-.inner::-webkit-scrollbar{ width: 8px; }
-.inner::-webkit-scrollbar-thumb{ background: rgba(111,92,173,.28); border-radius: 4px; }
-.inner::-webkit-scrollbar-track{ background: transparent; }
+.fit{
+  width: 100%;
+  transform-origin: center center;
+}
+/* 最后一个子元素的下边距会溢出 .fit 的盒子，被 scrollHeight 算进去 ——
+   量出来「超出 8~14px」其实什么都没被切掉，白让整页缩小一档。去掉它。 */
+.fit > *:last-child{ margin-bottom: 0; }
 
 /* ---------- 页头 -------------------------------------------------------- */
-.sh{ margin-bottom: clamp(18px, 2.8vh, 34px); }
+.sh{ margin-bottom: clamp(16px, 2.4vh, 30px); }
 .eyebrow{
   margin: 0 0 10px;
   font-size: 12.5px; font-weight: 700; letter-spacing: .16em;
@@ -476,43 +481,55 @@ pre code{ background: none; color: inherit; padding: 0; }
 }
 .dots button:hover span{ opacity: 1; }
 
-.arrows{
-  position: fixed; right: 26px; bottom: 26px; z-index: 40;
-  display: flex; gap: 10px; align-items: center;
+/* ---------- 底部中央：向下钝角（下一页） --------------------------------
+   左右下角的按钮和提示都撤掉了 —— 一页一屏的稿子不需要常驻的操作条，
+   留一个向下的钝角就够，它自己还带一圈粒子。 */
+.fab{
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  z-index: 40; width: 88px; height: 58px;
+  padding: 0; border: none; background: none; cursor: pointer;
+  display: grid; place-items: center;
+  transition: opacity .5s var(--ease), transform .5s var(--ease);
 }
-.arrows button{
-  width: 44px; height: 44px; cursor: pointer;
-  border-radius: var(--r-pill); border: 1px solid rgba(38,28,74,.12);
-  background: rgba(255,255,255,.72);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  color: var(--ink-2); font-size: 18px; line-height: 1;
-  box-shadow: var(--sh-1);
-  transition: transform .3s var(--ease), background .3s var(--ease);
+/* canvas 是「替换元素」：width:auto 会用它的 width 属性当 CSS 宽度，
+   而不是跟着 inset 撑开 —— 结果粒子层比钝角宽出一大截、还偏到右边。
+   显式写出宽高。 */
+.fab canvas{
+  position: absolute; left: -26px; top: -34px;
+  width: calc(100% + 52px); height: calc(100% + 68px);
+  pointer-events: none;
 }
-.arrows button:hover{ transform: translateY(-2px); background: #fff; }
-.arrows button:disabled{ opacity: .35; cursor: default; transform: none; }
-.tone-dark .arrows button{
-  background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: #fff;
+.fab svg{
+  position: relative; width: 40px; height: 19px;
+  overflow: visible;
 }
-.tone-dark .arrows button:hover{ background: rgba(255,255,255,.22); }
-.counter{
-  font-size: 12.5px; font-weight: 700; color: var(--faint);
-  font-variant-numeric: tabular-nums; margin-right: 4px;
+.fab svg path{
+  fill: none; stroke-linecap: round; stroke-linejoin: round;
+  stroke-width: 2.1;
+  stroke: rgba(111,92,173,.72);
+  transition: stroke .4s var(--ease);
 }
-.tone-dark .counter{ color: rgba(255,255,255,.6); }
-
-.hint{
-  position: fixed; left: 30px; bottom: 28px; z-index: 40;
-  font-size: 12px; color: var(--faint);
+.fab:hover svg path{ stroke: var(--primary); }
+.fab::after{                       /* 悬浮时的一圈柔光 */
+  content: ""; position: absolute; inset: 6px -6px;
+  border-radius: var(--r-pill); opacity: 0;
+  background: radial-gradient(closest-side, rgba(111,92,173,.22), transparent 78%);
+  transition: opacity .45s var(--ease);
 }
-.tone-dark .hint{ color: rgba(255,255,255,.5); }
-.hint kbd{
-  font-family: var(--font); font-size: 11px; font-weight: 700;
-  padding: 2px 6px; border-radius: 5px;
-  background: rgba(111,92,173,.12); border: 1px solid rgba(111,92,173,.2);
-  color: var(--primary-d);
+.fab:hover::after{ opacity: 1; }
+.fab:hover{ transform: translateX(-50%) translateY(4px); }
+.fab.gone{ opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(14px); }
+.tone-dark .fab svg path{ stroke: rgba(255,255,255,.78); }
+.tone-dark .fab:hover svg path{ stroke: #fff; }
+.tone-dark .fab::after{
+  background: radial-gradient(closest-side, rgba(255,255,255,.22), transparent 78%);
 }
-.tone-dark .hint kbd{ background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.2); color: #fff; }
+/* 钝角本身也在轻微呼吸，提示「可以往下」 */
+.fab svg{ animation: nudge 2.6s var(--ease) infinite; }
+@keyframes nudge{
+  0%, 62%, 100%{ transform: translateY(0); }
+  78%{ transform: translateY(5px); }
+}
 
 /* 封面专属 */
 .cover{ text-align: center; }
@@ -568,10 +585,9 @@ pre code{ background: none; color: inherit; padding: 0; }
   .brandbar .ver{ display: none; }
   .dots{ right: 12px; }
   .dots button span{ display: none; }
-  .arrows{ right: 14px; bottom: 14px; }
-  .hint{ display: none; }
-  table{ display: block; overflow-x: auto; }
-  th, td{ min-width: 9rem; }
+  .fab{ bottom: 14px; }
+  /* 不用 overflow:auto —— 那会出一条横向滚动条，直接交给 fitSlide 等比缩放 */
+  th, td{ min-width: 8rem; }
 }
 </style>
 </head>
@@ -592,13 +608,12 @@ pre code{ background: none; color: inherit; padding: 0; }
 
 <div class="dots" id="dots"></div>
 
-<div class="arrows">
-  <span class="counter" id="counter">1 / 18</span>
-  <button id="prev" title="上一页（←）">‹</button>
-  <button id="next" title="下一页（→）">›</button>
-</div>
-
-<div class="hint"><kbd>←</kbd> <kbd>→</kbd> 翻页 · <kbd>空格</kbd> 下一页 · <kbd>Home</kbd> 回封面</div>
+<button class="fab" id="fab" title="下一页" aria-label="下一页">
+  <canvas id="fabcv" aria-hidden="true"></canvas>
+  <svg viewBox="0 0 44 20" aria-hidden="true">
+    <path d="M3 4.5 L22 16 L41 4.5"/>
+  </svg>
+</button>
 
 <div class="deck" id="deck">
 
@@ -644,10 +659,11 @@ pre code{ background: none; color: inherit; padding: 0; }
       <a href="#" data-go="11" class="stag" style="--i:12"><i>08.5</i>浏览器指纹</a>
       <a href="#" data-go="12" class="stag" style="--i:13"><i>08.5</i>请求节奏与访问日志</a>
       <a href="#" data-go="13" class="stag" style="--i:14"><i>09</i>故障排查</a>
-      <a href="#" data-go="14" class="stag" style="--i:15"><i>09</i>常见症状</a>
-      <a href="#" data-go="15" class="stag" style="--i:16"><i>10</i>常见问题（上）</a>
-      <a href="#" data-go="16" class="stag" style="--i:17"><i>10</i>常见问题（下）</a>
-      <a href="#" data-go="17" class="stag" style="--i:18"><i>—</i>结语与免责</a>
+      <a href="#" data-go="14" class="stag" style="--i:15"><i>09</i>常见症状 · 登录与验证</a>
+      <a href="#" data-go="15" class="stag" style="--i:16"><i>09</i>常见症状 · 选课与显示</a>
+      <a href="#" data-go="16" class="stag" style="--i:17"><i>10</i>常见问题（上）</a>
+      <a href="#" data-go="17" class="stag" style="--i:18"><i>10</i>常见问题（下）</a>
+      <a href="#" data-go="18" class="stag" style="--i:19"><i>—</i>结语与免责</a>
     </div>
   </div>
 </section>
@@ -1013,26 +1029,47 @@ diagnostics\         导出的诊断包</pre>
   </div>
 </section>
 
-<!-- ===================== 15 常见症状 ===================== -->
-<section class="slide tone-light" data-bg="mesh" data-title="常见症状">
+<!-- ===================== 15 常见症状 · 登录与验证 ===================== -->
+<section class="slide tone-light" data-bg="mesh" data-title="常见症状 · 登录与验证">
   <div class="bg bg-mesh"></div>
   <div class="inner">
     <div class="sh">
       <p class="eyebrow stag" style="--i:0">09 · 常见症状</p>
-      <h2 class="stag" style="--i:1">常见症状</h2>
+      <h2 class="stag" style="--i:1">登录与验证</h2>
       <div class="rule stag" style="--i:2"></div>
     </div>
 
     <table class="stag" style="--i:3">
       <tr><th>症状</th><th>可能原因 / 处理</th></tr>
       <tr><td>一直卡在「正在登录…」</td><td>网络不通，或密码错误。跑 <code>--selftest</code> 看结论；确认密码能正常登录 info.tsinghua.edu.cn</td></tr>
-      <tr><td>要求图形验证码 / 二次验证</td><td><b>在本程序的登录页内完成，全程只有一个窗口</b>：<br>
-① 选择验证码发到哪（手机短信 / 企业微信）<br>
-② 输入收到的 6 位验证码（<b>3 分钟内有效</b>，没收到可点「重新发送」）<br>
-③ 学校会问「是否把本设备登记为信任设备」—— 选<b>「是」则 180 天内本机再登录都不用验证码</b>（会话过期自动重登也不会被拦），选「否」则下次仍需验证码。程序会列出选项与后果<br>
-图形验证码的图片会直接显示在这块区域里；万一程序认不出验证页面，会先询问是否打开浏览器窗口<br>
-<b>注意</b>：这和登录页上那个「信任此浏览器」勾选框是两回事 —— 那个是学校的「统一登录」开关（免输账号密码），<b>不等于免验证码</b></td></tr>
       <tr><td>提示「票据校验失败」</td><td>短时间登录太频繁被风控。等几分钟再试</td></tr>
+    </table>
+
+    <div class="card info stag" style="--i:4">
+      <b>要求图形验证码 / 二次验证 —— 在本程序的登录页内完成，全程只有一个窗口</b>
+      <ol style="margin:10px 0 0">
+        <li>选择验证码发到哪（手机短信 / 企业微信）</li>
+        <li>输入收到的 6 位验证码（<b>3 分钟内有效</b>，没收到可点「重新发送」）</li>
+        <li>学校会问「是否把本设备登记为信任设备」—— 选<b>「是」则 180 天内本机再登录都不用验证码</b>（会话过期自动重登也不会被拦），选「否」则下次仍需验证码。程序会列出选项与后果</li>
+      </ol>
+      <p style="margin:12px 0 0">图形验证码的图片会直接显示在这块区域里；万一程序认不出验证页面，会先询问是否打开浏览器窗口。</p>
+      <p style="margin:10px 0 0"><b>注意</b>：这和登录页上那个「信任此浏览器」勾选框是两回事 —— 那个是学校的「统一登录」开关（免输账号密码），<b>不等于免验证码</b>。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 16 常见症状 · 选课与显示 ===================== -->
+<section class="slide tone-light" data-bg="dome" data-title="常见症状 · 选课与显示">
+  <div class="bg bg-dome"></div>
+  <div class="inner">
+    <div class="sh">
+      <p class="eyebrow stag" style="--i:0">09 · 常见症状</p>
+      <h2 class="stag" style="--i:1">选课与显示</h2>
+      <div class="rule stag" style="--i:2"></div>
+    </div>
+
+    <table class="stag" style="--i:3">
+      <tr><th>症状</th><th>可能原因 / 处理</th></tr>
       <tr><td>课程校验显示「未找到」</td><td>检查课程号 / 课程名；也可能这门课本学期没开</td></tr>
       <tr><td>一直显示「暂无余量」</td><td>正常，就是没人退课。可以继续等待，或把间隔调小</td></tr>
       <tr><td>抢课时提示「只能选一门」</td><td>已有一门体育课。在清单里加一条「要退的课」，把旧的那门填进去</td></tr>
@@ -1040,6 +1077,7 @@ diagnostics\         导出的诊断包</pre>
     </table>
   </div>
 </section>
+
 
 <!-- ===================== 16 常见问题（上） ===================== -->
 <section class="slide tone-light" data-bg="grid" data-title="常见问题（上）">
@@ -1220,15 +1258,106 @@ diagnostics\         导出的诊断包</pre>
   addEventListener("resize", function(){ resize(); seed(); });
 
   /* ====================================================================
+     一之二、钝角自己的粒子
+     独立的一小块 canvas，和全屏那层互不干扰：粒子从钝角中心朝下方飘散，
+     平时缓慢持续，鼠标悬停和每次翻页各来一次爆发。
+     ==================================================================== */
+  var fcv = document.getElementById("fabcv");
+  var fctx = fcv.getContext("2d");
+  var FW = 1, FH = 1, fparts = [], fRunning = false;
+
+  function fResize(){
+    if (!fcv) return;
+    var r = fcv.getBoundingClientRect();
+    FW = fcv.width  = Math.max(1, Math.floor(r.width  * DPR));
+    FH = fcv.height = Math.max(1, Math.floor(r.height * DPR));
+  }
+
+  function fabBurst(n){
+    if (reduce || !fctx) return;
+    n = n || 12;
+    for (var i = 0; i < n; i++){
+      fparts.push({
+        x: FW / 2 + (Math.random() - .5) * FW * .6,
+        y: FH / 2 + (Math.random() - .5) * FH * .35,
+        vx: (Math.random() - .5) * .7 * DPR,
+        vy: (.25 + Math.random() * .85) * DPR,       // 朝下
+        r: (Math.random() * 1.6 + .5) * DPR,
+        life: 1, decay: .012 + Math.random() * .016
+      });
+    }
+    if (!fRunning){ fRunning = true; requestAnimationFrame(fFrame); }
+  }
+
+  function fFrame(){
+    fctx.clearRect(0, 0, FW, FH);
+    for (var i = fparts.length - 1; i >= 0; i--){
+      var p = fparts[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vy += .014 * DPR;                            // 轻微下坠
+      p.vx *= .992; p.life -= p.decay;
+      if (p.life <= 0 || p.y > FH + 12){ fparts.splice(i, 1); continue; }
+      fctx.beginPath();
+      fctx.arc(p.x, p.y, p.r * (.45 + p.life * .85), 0, 6.2832);
+      fctx.fillStyle = "rgba(" + (cur.r | 0) + "," + (cur.g | 0) + "," + (cur.b | 0) +
+                       "," + (p.life * .8).toFixed(3) + ")";
+      fctx.fill();
+    }
+    if (fparts.length){ requestAnimationFrame(fFrame); }
+    else { fRunning = false; fctx.clearRect(0, 0, FW, FH); }
+  }
+
+  if (fcv && !reduce){
+    fResize();
+    setTimeout(fResize, 60);                          // 字体/布局落定后再量一次
+    setInterval(function(){ if (!document.hidden) fabBurst(2); }, 850);
+    fcv.parentNode.addEventListener("mouseenter", function(){ fabBurst(20); });
+    addEventListener("resize", fResize);
+  }
+
+  /* ====================================================================
      二、翻页
      ==================================================================== */
   var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
   var dots = document.getElementById("dots");
   var bar = document.getElementById("bar");
-  var counter = document.getElementById("counter");
-  var btnPrev = document.getElementById("prev");
-  var btnNext = document.getElementById("next");
+  var fab = document.getElementById("fab");
   var idx = 0, busy = false;
+
+  // 每页内容外面套一层 .fit —— 放不下时对它做等比缩放，而不是出滚动条
+  slides.forEach(function(s){
+    var inner = s.querySelector(".inner");
+    if (!inner) return;
+    var fit = document.createElement("div");
+    fit.className = "fit";
+    while (inner.firstChild) fit.appendChild(inner.firstChild);
+    inner.appendChild(fit);
+  });
+
+  /* 内容自适应：放不下就整体等比缩小（绝不出滚动条）。
+     两个坑：
+       1. 不能拿 .inner 的 clientHeight 当「可用高度」—— .inner 是
+          内容撑开的，装得下时它就等于内容高度，量出来永远「刚好」，
+          结果每页都被无谓地缩一档。可用高度要从 .slide 的 padding 内框算。
+       2. 用 transform: scale() 而不是 zoom —— zoom 会改变元素自身的坐标
+          尺度，scrollHeight 和 clientHeight 不再是同一把尺子，收敛不了。 */
+  function fitSlide(slide){
+    var fit = slide.querySelector(".fit");
+    if (!fit) return;
+    fit.style.transform = "";
+    var cs = getComputedStyle(slide);
+    var availH = slide.clientHeight
+               - (parseFloat(cs.paddingTop) || 0)
+               - (parseFloat(cs.paddingBottom) || 0);
+    var availW = Math.min(1180, innerWidth * .94);
+    var needH = fit.scrollHeight;
+    // 窄窗口下表格会横向撑开，纵向量不出来 —— 两个方向都要算
+    var needW = Math.max(fit.scrollWidth, fit.offsetWidth);
+    var k = Math.min(1, availH / needH, availW / needW);
+    if (k < 0.995){
+      fit.style.transform = "scale(" + Math.max(0.6, k).toFixed(4) + ")";
+    }
+  }
 
   // 圆点导航
   slides.forEach(function(s, i){
@@ -1293,14 +1422,13 @@ diagnostics\         导出的诊断包</pre>
     document.body.classList.toggle("on-dark", s.classList.contains("tone-dark"));
     for (var i = 0; i < dotEls.length; i++) dotEls[i].classList.toggle("on", i === idx);
     bar.style.width = ((idx + 1) / slides.length * 100) + "%";
-    counter.textContent = (idx + 1) + " / " + slides.length;
-    btnPrev.disabled = idx === 0;
-    btnNext.disabled = idx === slides.length - 1;
+    // 最后一页收起向下的钝角
+    fab.classList.toggle("gone", idx === slides.length - 1);
 
     tgt = toneFor(s);
     bloom = 1;                       // 粒子绽开
-    var inner = s.querySelector(".inner");
-    if (inner) inner.scrollTop = 0;
+    fabBurst(26);                    // 钝角自己的粒子也放一次
+    fitSlide(s);
 
     if (location.hash !== "#p" + (idx + 1)) {
       try { history.replaceState(null, "", "#p" + (idx + 1)); } catch (e) {}
@@ -1312,8 +1440,11 @@ diagnostics\         导出的诊断包</pre>
   function next(){ go(idx + 1); }
   function prev(){ go(idx - 1); }
 
-  btnNext.addEventListener("click", next);
-  btnPrev.addEventListener("click", prev);
+  fab.addEventListener("click", next);
+  addEventListener("resize", function(){
+    clearTimeout(window.__fitT);
+    window.__fitT = setTimeout(function(){ fitSlide(slides[idx]); }, 160);
+  });
   var startBtn = document.getElementById("start");
   if (startBtn) startBtn.addEventListener("click", function(){ go(1); });
   var restart = document.getElementById("restart");

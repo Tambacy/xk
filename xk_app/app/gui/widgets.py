@@ -140,9 +140,19 @@ class SkySurface(QWidget):
         super().__init__(parent)
         self._aurora = Aurora(self)
         self._phase = 0.0
+        self._variant = "violet"
 
     def phase(self) -> float:
         return self._aurora.phase
+
+    def set_variant(self, name: str):
+        """换一种天幕「心情」（见 backdrop.VARIANTS）。"""
+        if name != self._variant:
+            self._variant = name
+            self.update()
+
+    def variant(self) -> str:
+        return self._variant
 
     def showEvent(self, e):
         self._aurora.start()
@@ -205,7 +215,7 @@ class HeroBand(SkySurface):
     def paintEvent(self, e):
         p = QPainter(self)
         paint_sky(p, self.width(), self.height(), self.phase(),
-                  fade_to=C["bg"], fade_h=self.FADE)
+                  fade_to=C["bg"], fade_h=self.FADE, variant=self._variant)
 
 
 class BrandPanel(SkySurface):
@@ -216,10 +226,12 @@ class BrandPanel(SkySurface):
         self.setObjectName("BrandPanel")
         self.setMinimumWidth(380)
         self.setMaximumWidth(560)
+        self._variant = "rose"
 
     def paintEvent(self, e):
         p = QPainter(self)
-        paint_sky(p, self.width(), self.height(), self.phase())
+        paint_sky(p, self.width(), self.height(), self.phase(),
+                  variant=self._variant)
 
 
 class LogoMark(QWidget):

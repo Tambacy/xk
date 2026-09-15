@@ -42,6 +42,34 @@ _photo_probed = False
 
 PHOTO_NAMES = ("backdrop.jpg", "backdrop.jpeg", "backdrop.png", "backdrop.webp")
 
+# 天幕的几种「心情」。
+# 每页换一种 —— 五页共用同一张背景的话，翻过去几乎没有「换了个地方」的感觉。
+# 都在淡紫这一族里变：只调极光的位置、浓度、星点密度和辉光色，不跳色。
+VARIANTS = {
+    # 默认：均衡的紫罗兰
+    "violet": {"ys_band": (0.30, 0.72, 1.15), "ys_panel": (0.20, 0.34, 0.72),
+               "alphas": (58, 38, 30), "stars": 1.0, "top_shift": 0},
+    # 偏冷：蓝紫更重、星更多
+    "cool":   {"ys_band": (0.16, 0.58, 1.30), "ys_panel": (0.14, 0.30, 0.64),
+               "alphas": (46, 28, 50), "stars": 1.6, "top_shift": 96,
+               "c1": "#7C86E8", "c3": "#5E6BD6", "glow": "#CFD8FF",
+               "glow_a": 40},
+    # 偏暖：暮粉当主角
+    "warm":   {"ys_band": (0.36, 0.82, 1.06), "ys_panel": (0.24, 0.40, 0.80),
+               "alphas": (40, 54, 24), "stars": 0.8, "top_shift": 78,
+               "c1": "#C58BE0", "c2": "#F0A8C4", "glow": "#FFD9E4",
+               "glow_a": 58},
+    # 沉下去：极光压低、更暗、星更密（用于「监控」这种要盯着的页面）
+    "deep":   {"ys_band": (0.46, 0.96, 1.40), "ys_panel": (0.34, 0.52, 0.94),
+               "alphas": (34, 22, 24), "stars": 1.9, "top_shift": -18,
+               "glow_a": 30},
+    # 玫瑰紫：介于 violet 与 warm 之间
+    "rose":   {"ys_band": (0.24, 0.66, 1.22), "ys_panel": (0.18, 0.36, 0.76),
+               "alphas": (50, 48, 32), "stars": 1.2, "top_shift": 64,
+               "c1": "#B98BE6", "c3": "#8E7BE4", "glow": "#F3C9DE",
+               "glow_a": 50},
+}
+
 
 def backdrop_image() -> QPixmap | None:
     """如果 assets 下放了真实背景图就用它，否则返回 None。"""
@@ -91,21 +119,26 @@ def _draw_cover(p: QPainter, pm: QPixmap, w: int, h: int):
         QRectF(0, 0, pm.width(), pm.height()))
 
 
-def _paint_generated(p: QPainter, w: int, h: int, phase: float, stars: bool):
+def _paint_generated(p: QPainter, w: int, h: int, phase: float, stars: bool,
+                     variant: str = "violet"):
     p.setRenderHint(QPainter.Antialiasing, True)
 
     # 「横条」和「竖版」要分别处理：同一条公式套在 1360×128 的顶栏和
     # 660×700 的登录面板上，得到的是一团糊 vs 一圈糊。
     band = h < w * 0.45
+    v = VARIANTS.get(variant, VARIANTS["violet"])
 
     # 1. 夜空
     g = QLinearGradient(0, 0, 0, h)
+    top = QColor(C["sky_top"])
+    if v.get("top_shift"):
+        top = top.lighter(v["top_shift"])
     if band:
-        g.setColorAt(0.00, QColor(C["sky_top"]))
+        g.setColorAt(0.00, top)
         g.setColorAt(0.62, QColor(C["sky_mid"]))
         g.setColorAt(1.00, QColor(C["sky_bottom"]))
     else:
-        g.setColorAt(0.00, QColor(C["sky_mid"]).lighter(112))
+        g.setColorAt(0.00, top)
         g.setColorAt(0.30, QColor(C["sky_top"]))
         g.setColorAt(0.70, QColor(C["sky_mid"]))
         g.setColorAt(1.00, QColor(C["sky_bottom"]))
@@ -116,41 +149,37 @@ def _paint_generated(p: QPainter, w: int, h: int, phase: float, stars: bool):
     # 4. 星点先画，让后面的极光把它们压暗一部分（有远近）
     if stars and h > 96:
         rnd = random.Random(_SEED)
-        n = max(8, min(80, int(w * h / 9000)))
-        top = 0.62 if band else 0.86
+        n = int(max(8, min(80, int(w * h / 9000))) * v.get("stars", 1.0))
+        top_f = 0.62 if band else 0.86
         p.setPen(Qt.NoPen)
         for i in range(n):
             x = rnd.random() * w
-            y = rnd.random() * h * top
+            y = rnd.random() * h * top_f
             r = 0.7 + rnd.random() * 1.1
             tw = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(phase * 1.7 + i * 1.31))
             a = int((55 + rnd.random() * 105) * tw)
             p.setBrush(QColor(255, 255, 255, max(0, min(200, a))))
             p.drawEllipse(QPointF(x, y), r, r)
 
-    # 2. 极光：三团，缓慢反向漂移
+    # 2. 极光：三团，缓慢反向漂移。位置/颜色/浓度按 variant 变。
     a1 = (phase * 0.17) % 2.0 - 1.0
     a2 = (phase * 0.11 + 0.6) % 2.0 - 1.0
     a3 = (phase * 0.23 + 1.3) % 2.0 - 1.0
-    if band:
-        ys = (0.30, 0.72, 1.15)
-        alphas = (58, 38, 30)
-    else:
-        ys = (0.20, 0.34, 0.72)
-        alphas = (62, 46, 40)
-    _blob(p, w * (0.30 + 0.10 * a1), h * ys[0], r_blob,
-          C["sky_aurora_a"], alphas[0])
-    _blob(p, w * (0.76 + 0.09 * a2), h * ys[1], r_blob * 0.82,
-          C["sky_aurora_b"], alphas[1])
-    _blob(p, w * (0.52 + 0.12 * a3), h * ys[2], r_blob * 0.94,
-          C["sky_aurora_c"], alphas[2])
+    ys = v["ys_band"] if band else v["ys_panel"]
+    alphas = v["alphas"]
+    cols = (v.get("c1") or C["sky_aurora_a"],
+            v.get("c2") or C["sky_aurora_b"],
+            v.get("c3") or C["sky_aurora_c"])
+    _blob(p, w * (0.30 + 0.10 * a1), h * ys[0], r_blob, cols[0], alphas[0])
+    _blob(p, w * (0.76 + 0.09 * a2), h * ys[1], r_blob * 0.82, cols[1], alphas[1])
+    _blob(p, w * (0.52 + 0.12 * a3), h * ys[2], r_blob * 0.94, cols[2], alphas[2])
 
     # 3. 低空辉光
     gg = QRadialGradient(QPointF(w * 0.5, h * (1.35 if band else 1.06)),
                          max(w, h) * (0.9 if band else 0.72))
-    gc = QColor(C["sky_glow"])
-    gc.setAlpha(46 if band else 54)
-    g0 = QColor(C["sky_glow"])
+    gc = QColor(v.get("glow") or C["sky_glow"])
+    gc.setAlpha(v.get("glow_a", 46 if band else 54))
+    g0 = QColor(v.get("glow") or C["sky_glow"])
     g0.setAlpha(0)
     gg.setColorAt(0.0, gc)
     gg.setColorAt(1.0, g0)
@@ -193,8 +222,11 @@ def _paint_arcs(p: QPainter, w: int, h: int, *, clip_h: int | None = None,
 
 def paint_sky(p: QPainter, w: int, h: int, phase: float = 0.0, *,
               arcs: bool = True, stars: bool = True,
-              fade_to: str | None = None, fade_h: int = 0) -> None:
+              fade_to: str | None = None, fade_h: int = 0,
+              variant: str = "violet") -> None:
     """画一整块天幕。`phase` 随时间推进 → 极光漂移、星点明灭。
+
+    variant：见 VARIANTS，决定这一页的天幕「心情」。
 
     fade_to / fade_h：底部 `fade_h` 像素化进 `fade_to` 这个颜色。
     **必须在两个颜色之间插值之外另想办法** —— 直接插值会在中间调留下一道灰带；
@@ -212,7 +244,7 @@ def paint_sky(p: QPainter, w: int, h: int, phase: float = 0.0, *,
         veil.setColorAt(1.0, QColor(20, 13, 43, 205))
         p.fillRect(0, 0, w, h, veil)
     else:
-        _paint_generated(p, w, h, phase, stars)
+        _paint_generated(p, w, h, phase, stars, variant)
 
     if arcs:
         band = h < w * 0.45
