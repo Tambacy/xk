@@ -17,7 +17,7 @@ from .core import BrowserCore
 from .pages import LoginPage, ModePage, CoursesPage, ConfirmPage, MonitorPage
 from .theme import stylesheet
 from . import motion
-from .motion import ParticleOverlay, TurnCurtain
+from .motion import ParticleOverlay, RevealCurtain
 from .widgets import HeroBand, LogoMark
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
 from ..browser import COURSE_KINDS
@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         self.entries: list[CourseEntry] = self.cfg.courses_as_entries()
         self.results: dict[int, dict] = {}
         self.core: BrowserCore | None = None
-        self.curtain: TurnCurtain | None = None
+        self.curtain: RevealCurtain | None = None
         self.particles: ParticleOverlay | None = None
 
         self.setWindowTitle(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
@@ -190,7 +190,7 @@ class MainWindow(QMainWindow):
                 snap_new = cur.grab()
         if snap_old is not None and snap_new is not None:
             if self.curtain is None:
-                self.curtain = TurnCurtain(self.centralWidget())
+                self.curtain = RevealCurtain(self.centralWidget())
             self.curtain.play(snap_old, snap_new, geo, reverse=reverse)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)

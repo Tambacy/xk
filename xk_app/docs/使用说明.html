@@ -99,17 +99,21 @@ body{
 }
 .slide.prev{ transform: translateY(-30px) scale(.985); }
 
-/* 进场时扫过一层柔光 */
+/* 进场时从中心化开的一层渐变辉光（配合全局粒子层的绽开）——
+   不是随便扫一道白光，而是和界面同一套的淡紫渐变。 */
 .slide::after{
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
-  background: linear-gradient(105deg, transparent 34%, rgba(255,255,255,.5) 50%, transparent 66%);
-  transform: translateX(-30%);
+  background:
+    radial-gradient(58% 54% at 50% 46%,
+      rgba(255,255,255,.52) 0%, rgba(206,190,248,.30) 42%, transparent 72%),
+    linear-gradient(102deg, transparent 28%, rgba(214,200,255,.42) 50%, transparent 72%);
+  transform: scale(.84);
 }
-.slide.active::after{ animation: sweep 1.15s var(--ease) .1s 1 both; }
-@keyframes sweep{
-  0%{ opacity: 0; transform: translateX(-45%); }
-  35%{ opacity: .85; }
-  100%{ opacity: 0; transform: translateX(45%); }
+.slide.active::after{ animation: reveal .92s var(--ease) .04s 1 both; }
+@keyframes reveal{
+  0%{ opacity: 0; transform: scale(.82); }
+  26%{ opacity: .92; }
+  100%{ opacity: 0; transform: scale(1.16); }
 }
 
 .inner{

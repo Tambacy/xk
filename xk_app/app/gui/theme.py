@@ -430,15 +430,6 @@ QPlainTextEdit#Log {{
     padding: 16px 18px;
     selection-background-color: {C['primary_dark']};
 }}
-QPlainTextEdit#Log QScrollBar::handle:vertical {{
-    background: rgba(255, 255, 255, 22%); border-radius: 5px;
-}}
-QPlainTextEdit#Log QScrollBar::handle:vertical:hover {{
-    background: rgba(255, 255, 255, 36%);
-}}
-QPlainTextEdit#Log QScrollBar:vertical {{
-    background: transparent; width: 11px; margin: 2px;
-}}
 
 /* ======================================================================
    列表 / 滚动条
@@ -446,18 +437,41 @@ QPlainTextEdit#Log QScrollBar:vertical {{
 QListWidget {{ background: transparent; border: none; outline: none; }}
 QListWidget::item {{ border-radius: {R_MD}px; margin: 3px 0; }}
 
-QScrollBar:vertical {{ background: transparent; width: 9px; margin: 3px 2px; }}
+/* 滚动条：**平时完全透明**，鼠标移到该区域或拖到把手上才显形。
+   常驻一条浅灰竖条横在版面中间是最伤观感的东西 —— 但直接藏掉又会让
+   「下面还有内容」变得不可知（课程页确实有一屏放不下）。所以做成
+   悬停显形的浮层式滚动条，不滚的时候等于不存在。 */
+QScrollBar:vertical {{ background: transparent; width: 11px; margin: 3px 2px; }}
 QScrollBar::handle:vertical {{
-    background: rgba(28, 20, 54, 14%); border-radius: 4px; min-height: 40px;
+    background: transparent; border-radius: 5px; min-height: 44px;
 }}
-QScrollBar::handle:vertical:hover {{ background: rgba(28, 20, 54, 28%); }}
-QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 2px 3px; }}
+QScrollArea:hover QScrollBar::handle:vertical,
+QScrollBar:hover QScrollBar::handle:vertical {{
+    background: rgba(38, 28, 74, 20%);
+}}
+QScrollBar::handle:vertical:hover {{ background: rgba(38, 28, 74, 40%); }}
+
+QScrollBar:horizontal {{ background: transparent; height: 11px; margin: 2px 3px; }}
 QScrollBar::handle:horizontal {{
-    background: rgba(28, 20, 54, 14%); border-radius: 4px; min-width: 40px;
+    background: transparent; border-radius: 5px; min-width: 44px;
 }}
-QScrollBar::handle:horizontal:hover {{ background: rgba(28, 20, 54, 28%); }}
+QScrollArea:hover QScrollBar::handle:horizontal,
+QScrollBar:hover QScrollBar::handle:horizontal {{
+    background: rgba(38, 28, 74, 20%);
+}}
+QScrollBar::handle:horizontal:hover {{ background: rgba(38, 28, 74, 40%); }}
+
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+
+/* 深色日志面板里的滚动条同理 */
+QPlainTextEdit#Log QScrollBar::handle:vertical {{ background: transparent; }}
+QPlainTextEdit#Log:hover QScrollBar::handle:vertical {{
+    background: rgba(255, 255, 255, 24%);
+}}
+QPlainTextEdit#Log QScrollBar::handle:vertical:hover {{
+    background: rgba(255, 255, 255, 40%);
+}}
 """
 
 

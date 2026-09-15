@@ -6,8 +6,8 @@
 而且 Qt 自带的这几个类（QPropertyAnimation / QVariantAnimation /
 QGraphicsEffect 子类）足够做出需要的效果。
 
-  · `TurnCurtain` —— 页面切换的**翻页**效果：旧页向左滑出并轻微收缩，
-    新页从右侧滑入，旧页前缘在新页上投一道影子。两层画在同一个控件里。
+  · `RevealCurtain` —— 页面切换：新页通过一张径向渐变遮罩从中心化开，
+    边缘跑一圈粒子，像新内容由粒子聚拢而成。
   · `ParticleOverlay` —— 覆盖窗口的粒子层。按钮悬停 / 点击时在它周围
     炸开一小簇，颜色取自当前主题。
   · `Aurora` —— 驱动天幕相位的计时器。相位推进 → 极光漂移、星点明灭。
@@ -19,11 +19,13 @@ QGraphicsEffect 子类）足够做出需要的效果。
 """
 from __future__ import annotations
 
+import math
 import random
 
-from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QRect, QRectF, QTimer,
-                            QVariantAnimation, Qt)
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
+from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QPointF, QRect,
+                            QRectF, QTimer, QVariantAnimation, Qt)
+from PySide6.QtGui import (QColor, QImage, QLinearGradient, QPainter, QPixmap,
+                           QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
 from .theme import C, D_PAGE
@@ -34,26 +36,25 @@ ENABLED = True
 # ==========================================================================
 # 页面切换：翻页
 # ==========================================================================
-class TurnCurtain(QWidget):
-    """翻页幕布：把「旧页滑出 + 新页滑入」画在**同一个控件**上。
+class RevealCurtain(QWidget):
+    """粒子渐变揭示。
 
-    为什么不给页面挂 QGraphicsEffect：卡片自己已经挂了投影用的 effect，
-    父子两层嵌套时子控件那层会被漏掉（实测切过去之后标题和按钮都在、
-    三张模式卡整片消失）。
+    旧页整片垫底，新页通过一张**径向渐变遮罩**从中心化开：遮罩边缘是软的
+    （不是硬切一条线），边缘上再跑一圈粒子，读起来像新页面由粒子聚拢而成。
 
-    为什么两层画在一块：真实页面就在幕布下面。两块独立幕布在交接处会
-    露出底下的真实内容；合成到同一张画布上就没有缝。
+    为什么不用「翻页」那种位移：位移会把注意力引到「一张纸在滑」上，
+    而这个程序切页时用户关心的是新页内容 —— 渐变揭示让新内容**浮现**出来，
+    比滑入安静，也更像同一块界面在换内容。
 
-    质感来自三处：旧页前缘落在新页上的一道投影、两层错开的速度差
-    （于是中段能看见旧页「压」在新页上）、以及缓动曲线。
-
-    **两层都必须完全不透明。** 第一版给两层都加了透明度渐变，结果两张页面
-    叠在一起互相透视 —— 那是交叉淡出，不是翻页。翻页靠的是**位移**：
-    旧页整片滑走，新页整片滑进来，重叠期间旧页盖在新页上面。
+    几个实现要点：
+      · 遮罩按 1/3 分辨率画再放大 —— 径向渐变放大不会糊，但能省下十几倍开销
+      · 新页始终保持原分辨率（只有遮罩是低分辨率的），否则过程中会先糊一下
+      · 两层都画在同一个控件里：真实页面就在幕布下面，分开画会露出底下的内容
     """
 
-    SHIFT = 0.80      # 新页从侧面多远的地方滑入（占宽度比例）
-    PUSH = 1.00       # 旧页滑出的距离：必须 ≥1，否则收尾时还压着新页
+    DURATION = 480
+    BAND = 0.19          # 羽化带占半径的比例。太大整屏会糊成一团雾
+    MASK_DIV = 3         # 遮罩降采样倍数
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
@@ -61,19 +62,26 @@ class TurnCurtain(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self._old = None
         self._new = None
-        self._p = 1.0
-        self._rev = False
+        self._p = 0.0
+        self._ps = []
         self._bg = QColor(C["bg"])
         self.hide()
 
         self.anim = QVariantAnimation(self)
-        self.anim.setDuration(D_PAGE)
-        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.setDuration(self.DURATION)
+        self.anim.setEasingCurve(QEasingCurve.InOutCubic)
         self.anim.valueChanged.connect(self._on)
-        self.anim.finished.connect(self.hide)
+        self.anim.finished.connect(self._done)
 
+    def _done(self):
+        self._ps = []
+        self.hide()
+
+    # -- 生命周期 ------------------------------------------------------
     def play(self, old: QPixmap, new: QPixmap, geo: QRect, reverse: bool = False):
-        self._old, self._new, self._rev = old, new, reverse
+        self._old, self._new = old, new
+        self._ps = []
+        self._p = 0.0
         self.setGeometry(geo)
         self.raise_()
         self.show()
@@ -82,50 +90,109 @@ class TurnCurtain(QWidget):
         self.anim.setEndValue(1.0)
         self.anim.start()
 
+    def _max_r(self) -> float:
+        """盖住四个角所需的半径。"""
+        return math.hypot(self.width(), self.height()) / 2.0 * 1.02
+
+    def _radius(self, t: float) -> float:
+        return self._max_r() * (0.04 + 0.96 * t)
+
     def _on(self, v):
-        self._p = float(v)
+        t = float(v)
+        r = self._radius(t)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+
+        # 沿揭示边缘撒粒子
+        if t < 0.98:
+            for _ in range(5):
+                a = random.random() * math.tau
+                rr = r * (0.90 + random.random() * 0.14)
+                sp = 0.85 + random.random() * 1.7
+                self._ps.append({
+                    "x": cx + math.cos(a) * rr,
+                    "y": cy + math.sin(a) * rr,
+                    "vx": math.cos(a) * sp,
+                    "vy": math.sin(a) * sp,
+                    "r": 1.4 + random.random() * 2.4,
+                    "life": 1.0,
+                    "decay": 0.018 + random.random() * 0.016,
+                })
+
+        alive = []
+        for q in self._ps:
+            q["x"] += q["vx"]
+            q["y"] += q["vy"]
+            q["vx"] *= 0.972
+            q["vy"] *= 0.972
+            q["life"] -= q["decay"]
+            if q["life"] > 0:
+                alive.append(q)
+        self._ps = alive[-260:]
+
+        self._p = t
         self.update()
 
+    # -- 绘制 ----------------------------------------------------------
     def paintEvent(self, e):
-        if self._old is None or self._new is None:
+        if self._old is None:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         w, h = self.width(), self.height()
-        t = self._p
-        sgn = -1.0 if self._rev else 1.0
+        if w <= 0 or h <= 0:
+            return
 
-        p.fillRect(0, 0, w, h, self._bg)
-
-        # 新页：从侧面滑入（不透明）
-        dx_new = sgn * (1.0 - t) * w * self.SHIFT
-        p.save()
-        p.translate(dx_new, 0)
-        p.drawPixmap(0, 0, self._new)
-        p.restore()
-
-        # 旧页：向反方向滑出（不透明，盖在新页上面）
-        dx_old = -sgn * t * w * self.PUSH
-
-        # 旧页前缘投在新页上的影子：先画影子，旧页再盖上去
-        if sgn < 0:
-            edge = dx_old                      # 反向时前缘是左边缘
-            gx0 = edge - 76
-            g = QLinearGradient(gx0, 0, edge, 0)
-            g.setColorAt(0.0, QColor(12, 8, 30, 0))
-            g.setColorAt(1.0, QColor(12, 8, 30, 130))
-        else:
-            edge = dx_old + w                  # 正向时前缘是右边缘
-            gx0 = edge
-            g = QLinearGradient(gx0, 0, gx0 + 76, 0)
-            g.setColorAt(0.0, QColor(12, 8, 30, 130))
-            g.setColorAt(1.0, QColor(12, 8, 30, 0))
-        p.fillRect(QRectF(gx0, 0, 76, h), g)
-
-        p.save()
-        p.translate(dx_old, 0)
         p.drawPixmap(0, 0, self._old)
-        p.restore()
+
+        t = self._p
+        if t > 0.002 and self._new is not None:
+            r = self._radius(t)
+            mw = max(24, w // self.MASK_DIV)
+            mh = max(24, h // self.MASK_DIV)
+
+            # 低分辨率的径向遮罩
+            mask = QImage(mw, mh, QImage.Format_ARGB32_Premultiplied)
+            mask.fill(0)
+            mp = QPainter(mask)
+            mp.setRenderHint(QPainter.Antialiasing, True)
+            rg = QRadialGradient(mw / 2.0, mh / 2.0, max(1.0, r / self.MASK_DIV))
+            rg.setColorAt(0.0, QColor(0, 0, 0, 255))
+            solid = max(0.0, 1.0 - self.BAND)
+            rg.setColorAt(solid, QColor(0, 0, 0, 255))
+            rg.setColorAt(1.0, QColor(0, 0, 0, 0))
+            mp.fillRect(0, 0, mw, mh, rg)
+            mp.end()
+
+            # 新页按遮罩抠出来（新页保持原分辨率）
+            tmp = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+            tmp.fill(0)
+            tp = QPainter(tmp)
+            tp.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            tp.drawPixmap(0, 0, self._new)
+            tp.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            tp.drawImage(QRect(0, 0, w, h), mask)
+            tp.end()
+            p.drawImage(0, 0, tmp)
+
+            # 边缘一圈柔光：窄一点、亮一点，是「化开的那条边」而不是一片雾
+            edge = max(1.0, r)
+            gg = QRadialGradient(w / 2.0, h / 2.0, edge)
+            gg.setColorAt(max(0.0, 1.0 - self.BAND * 2.2), QColor(196, 178, 240, 0))
+            gg.setColorAt(max(0.0, 1.0 - self.BAND * 0.75), QColor(222, 210, 255, 120))
+            gg.setColorAt(1.0, QColor(167, 140, 230, 0))
+            p.setPen(Qt.NoPen)
+            p.setBrush(gg)
+            p.drawEllipse(QPointF(w / 2.0, h / 2.0), edge, edge)
+
+        # 粒子
+        if self._ps:
+            p.setPen(Qt.NoPen)
+            for q in self._ps:
+                c = QColor(C["primary_2"])
+                c.setAlpha(int(235 * max(0.0, q["life"]) ** 1.2))
+                p.setBrush(c)
+                rr = q["r"] * (0.35 + q["life"] * 0.95)
+                p.drawEllipse(QRectF(q["x"] - rr, q["y"] - rr, rr * 2, rr * 2))
 
 
 # ==========================================================================
