@@ -110,6 +110,19 @@ class MainWindow(QMainWindow):
         if app is not None:
             app.installEventFilter(self)
 
+        # 已经有保存的凭据就自动填上。
+        # ⚠ 这段一度被挤到 eventFilter 的 return 之后，成了永远不执行的死代码 ——
+        # 表现就是「记住密码勾了也没用，下次还得重输」。改动这个类时留意别再把
+        # 它挤出去（gui 包有一个不可达语句检查守着）。
+        d = self.store.load()
+        if d:
+            if d.get("user"):
+                self.page_login.ed_user.setText(d["user"])
+            if d.get("pass"):
+                self.page_login.ed_pwd.setText(d["pass"])
+        if note and note != "配置已载入":
+            self.page_login.set_status(note, "warn")
+
         self.goto(0)
 
     # ------------------------------------------------------------------
@@ -131,16 +144,6 @@ class MainWindow(QMainWindow):
             elif t == QEvent.MouseButtonPress:
                 self.particles.emit_from(obj, 22)
         return super().eventFilter(obj, ev)
-
-        # 已经有保存的凭据就自动填上
-        d = self.store.load()
-        if d:
-            if d.get("user"):
-                self.page_login.ed_user.setText(d["user"])
-            if d.get("pass"):
-                self.page_login.ed_pwd.setText(d["pass"])
-        if note and note != "配置已载入":
-            self.page_login.set_status(note, "warn")
 
     # ------------------------------------------------------------------
     def _wire(self):

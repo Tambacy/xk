@@ -183,4 +183,65 @@ try:
         win.core.wait(3000)
 except Exception:
     pass
+win.close()
+app.processEvents()
+
+# ---------------------------------------------------------------------------
+# 「记住密码」的往返：保存 → 重启 → 自动填回
+#
+# 这个功能曾经整个失效过，而且**不报任何错**：自动填凭据的那段代码被挤到
+# eventFilter 的 return 之后成了死代码 —— 保存正常、读回正常、就是没人把它
+# 填进输入框，表现成「勾了记住密码，下次还得重输」。
+# 所以这里必须真的重建一次 MainWindow，只测 store.load() 是测不出来的。
+# ---------------------------------------------------------------------------
+import shutil
+import tempfile
+
+from app.secretstore import SecretStore
+
+print()
+print("=" * 60)
+print("「记住密码」往返")
+print("=" * 60)
+
+_tmp_home = Path(tempfile.mkdtemp(prefix="xk-remember-"))
+try:
+    _paths = Paths.build(_tmp_home)
+    FAKE_USER = "2020000000"
+    FAKE_PWD = "Fixture-Pwd-2026!"
+
+    _w = MainWindow(_paths)
+    app.processEvents()
+    assert _w.page_login.ed_user.text() == "", "全新目录下学号不该有值"
+    assert _w.page_login.ed_pwd.text() == "", "全新目录下密码不该有值"
+    print("  全新目录：输入框为空            PASS")
+
+    SecretStore(_paths.root).save(FAKE_USER, FAKE_PWD, remember=True)
+    _w.close()
+    app.processEvents()
+    del _w
+
+    _w2 = MainWindow(_paths)
+    app.processEvents()
+    assert _w2.page_login.ed_user.text() == FAKE_USER, "学号没有自动填回"
+    assert _w2.page_login.ed_pwd.text() == FAKE_PWD, "密码没有自动填回"
+    assert _w2.page_login.cb_remember.isChecked(), "「记住密码」没有保持勾选"
+    print(f"  重启后自动填回 {FAKE_USER} / {'*' * len(FAKE_PWD)}  PASS")
+    _w2.close()
+    app.processEvents()
+    del _w2
+
+    # 不勾「记住密码」时只留学号，密码必须清掉
+    SecretStore(_paths.root).save(FAKE_USER, "", remember=False)
+    _w3 = MainWindow(_paths)
+    app.processEvents()
+    assert _w3.page_login.ed_user.text() == FAKE_USER, "学号应该仍然填回"
+    assert _w3.page_login.ed_pwd.text() == "", "不记住密码时不该填回密码"
+    print("  不勾选时只填学号、不留密码      PASS")
+    _w3.close()
+    app.processEvents()
+finally:
+    shutil.rmtree(_tmp_home, ignore_errors=True)
+
+print()
 print("OK")

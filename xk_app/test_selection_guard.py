@@ -280,6 +280,43 @@ check("不相干的课不会被误判", same_course(SEL[0], CourseEntry(action="
 
 print()
 print("=" * 78)
+print("【7】静态护栏：return 之后不留死代码")
+print("=" * 78)
+# 这类问题的危害是**它不报错** —— 代码照常跑，只是那几行永远不执行。
+# 「记住密码」失效就是这么来的：一段自动填凭据的代码被挤到 eventFilter 的
+# return 之后，保存正常、读回正常，就是没人把它填进输入框。
+import ast as _ast
+
+_TERMINAL = (_ast.Return, _ast.Raise, _ast.Continue, _ast.Break)
+_BODIES = ("body", "orelse", "finalbody")
+_dead = []
+_parsed = 0
+for _p in sorted(Path(__file__).parent.rglob("*.py")):
+    _rel = _p.relative_to(Path(__file__).parent).as_posix()
+    if any(x in _rel for x in ("__pycache__", "/build/", "/dist/")):
+        continue
+    try:
+        # utf-8-sig：有文件带 BOM，用 utf-8 读会把 U+FEFF 留在开头导致解析失败
+        _tree = _ast.parse(_p.read_text(encoding="utf-8-sig"), filename=str(_p))
+    except SyntaxError as _e:
+        _dead.append(f"{_rel}:{_e.lineno} 语法错误 {_e.msg}")
+        continue
+    _parsed += 1
+    for _node in _ast.walk(_tree):
+        for _attr in _BODIES:
+            _body = getattr(_node, _attr, None)
+            if not isinstance(_body, list):
+                continue
+            for _i, _st in enumerate(_body[:-1]):
+                if isinstance(_st, _TERMINAL):
+                    _dead.append(f"{_rel}:{_body[_i + 1].lineno} "
+                                 f"{type(_st).__name__} 之后还有语句")
+print(f"     解析了 {_parsed} 个文件")
+check("没有不可达语句", _dead, [])
+check("确实解析到了文件（自检：别扫了个空）", _parsed > 10, True)
+
+print()
+print("=" * 78)
 if FAIL:
     print(f"{FAIL} 项失败")
     sys.exit(1)
