@@ -20,7 +20,7 @@ import traceback
 from PySide6.QtCore import QThread, Signal
 
 from ..browser import ScholarBrowser, SessionExpired, PageError, NeedSecondFactor
-from ..courses import CourseQuery, resolve, find_conflicts, pick_section
+from ..courses import CourseQuery, resolve, find_conflicts, pick_section, same_course
 from ..config import AppConfig, Paths, CourseEntry
 from ..humanize import HumanActor, NORMAL
 from ..logging_setup import get_logger
@@ -139,8 +139,16 @@ class BrowserCore(QThread):
         self.password = password
         self._jobs.put(("login", None))
 
-    def do_validate(self, index: int, entry: CourseEntry, selected_snapshot: list):
-        self._jobs.put(("validate", (index, entry, selected_snapshot)))
+    def do_validate(self, index: int, entry: CourseEntry, selected_snapshot: list,
+                    drop_entries: list | None = None):
+        """校验一条课程。
+
+        drop_entries：清单里所有「要退的课」。它们会在抢课开始时先被退掉，
+        所以**不该**再算作时间冲突 —— 否则学生把让位的课填进「要退的课」，
+        目标课那边还一直显示「时间冲突」，看起来像设置没生效。
+        """
+        self._jobs.put(("validate", (index, entry, selected_snapshot,
+                                     list(drop_entries or []))))
 
     def do_start(self):
         self._jobs.put(("start", None))
@@ -282,7 +290,8 @@ class BrowserCore(QThread):
             log.error("切换浏览器模式失败", exc_info=True)
             self.say(f"切换浏览器模式失败：{e}", "ERROR")
 
-    def _handle_validate(self, index: int, entry: CourseEntry, selected: list):
+    def _handle_validate(self, index: int, entry: CourseEntry, selected: list,
+                         drop_entries: list | None = None):
         result = {"index": index, "ok": False, "reason": "", "rows": [],
                   "conflicts": [], "entry": entry}
         try:
@@ -349,11 +358,22 @@ class BrowserCore(QThread):
             if not entry.kxh:
                 entry.kxh = row.kxh
 
-            # 时间冲突：与已选课程比
+            # 时间冲突：与已选课程比，但**排除掉马上就要退掉的课**。
+            # 那些课在抢课开始时先被退掉，留着它们报冲突等于让学生在
+            # 「要退的课」里填了也不生效。
+            drops = [d for d in (drop_entries or []) if getattr(d, "action", "") == "drop"]
+            kept = [c for c in snap if not any(same_course(c, d) for d in drops)]
             conflicts = find_conflicts(row.time_text,
-                                       [(c.name, c.time_text) for c in snap])
+                                       [(c.name, c.time_text) for c in kept])
+            # 顺便把「本来会冲突、但因为你打算退掉它所以不算」的课单独列出来，
+            # 让用户看得见程序确实读懂了「要退的课」。
+            waived = []
+            if drops:
+                dropped_now = [c for c in snap if any(same_course(c, d) for d in drops)]
+                waived = find_conflicts(row.time_text,
+                                        [(c.name, c.time_text) for c in dropped_now])
             result.update(ok=True, reason="已找到课程", conflicts=conflicts,
-                          rows=[row.__dict__])
+                          waived_conflicts=waived, rows=[row.__dict__])
             self.validated.emit(index, result)
         except SessionExpired:
             self._try_relogin()

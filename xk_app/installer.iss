@@ -11,7 +11,7 @@
 
 #define AppName        "学校选课助手"
 #define AppNameEn      "THU XkHelper"
-#define AppVersion     "0.3.1"
+#define AppVersion     "0.3.2"
 #define AppPublisher   "个人自用"
 #define AppExeName     "XkHelper.exe"
 

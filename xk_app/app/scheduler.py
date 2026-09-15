@@ -34,6 +34,7 @@ from typing import Callable
 from .browser import (ScholarBrowser, SessionExpired, PageError,
                       COURSE_KINDS, CapacityRow, SelectedCourse)
 from .courses import (CourseQuery, resolve, pick_section, find_conflicts,
+                      same_course,
                       parse_slots, describe_rows)
 from .config import AppConfig, CourseEntry, Paths
 from .humanize import (HumanActor, Tempo, RELAXED, NORMAL, URGENT,
@@ -702,15 +703,12 @@ class Scheduler:
         victims: list[SelectedCourse] = []
 
         # 1) 学生显式指定要退的课（模式二）
+        #    认课的三条线索走 courses.same_course，和校验冲突用的是同一套 ——
+        #    分开写迟早会漂移成「校验说不用退、运行时却退了」。
         drop_entries = [c for c in cfg.courses_as_entries() if c.action == "drop"]
         for de in drop_entries:
             for c in selected:
-                if de.kch and c.kch == de.kch:
-                    victims.append(c)
-                elif de.name and de.name in c.name and (
-                        not de.kxh or str(c.kxh) == str(de.kxh)):
-                    victims.append(c)
-                elif de.resolved_cid and de.resolved_cid == c.del_id:
+                if same_course(c, de):
                     victims.append(c)
 
         # 2) 同课程类别的体育课：一学期只能选一门，必须让位

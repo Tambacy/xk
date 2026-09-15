@@ -227,6 +227,59 @@ for msg, should_retry in [
 
 print()
 print("=" * 78)
+print("【6】时间冲突：判据、周次感知、要退的课不算冲突")
+print("=" * 78)
+
+from app.courses import find_conflicts, parse_slots, parse_weeks, same_course
+
+# 判据：同一大节的同一小节，且周次有交集
+check("同一时段 -> 冲突",
+      bool(find_conflicts("4-1(全周)", [("控制工程基础", "4-1(全周)")])))
+check("不同大节 -> 不冲突",
+      find_conflicts("4-1(全周)", [("控制工程基础", "5-1(全周)")]), [])
+check("不同小节 -> 不冲突",
+      find_conflicts("4-1(全周)", [("控制工程基础", "4-2(全周)")]), [])
+check("周次不重叠 -> 不冲突（前八周 vs 后八周）",
+      find_conflicts("4-1(前八周)", [("控制工程基础", "4-1(后八周)")]), [])
+check("周次部分重叠 -> 冲突（前八周 vs 全周）",
+      bool(find_conflicts("4-1(前八周)", [("控制工程基础", "4-1(全周)")])))
+check("单周 vs 双周 -> 不冲突",
+      find_conflicts("4-1(单周)", [("控制工程基础", "4-1(双周)")]), [])
+check("单周 vs 全周 -> 冲突",
+      bool(find_conflicts("4-1(单周)", [("控制工程基础", "4-1(全周)")])))
+check("目标课没填时间 -> 不报冲突",
+      find_conflicts("", [("控制工程基础", "4-1(全周)")]), [])
+
+# 「要退的课」不算冲突 —— 这是这次要确认的关键行为
+TARGET_TIME = "4-1(全周)"
+SEL = [
+    SelectedCourse(kind="必修", kch="30110012", kxh="1", name="控制工程基础",
+                   time_text="4-1(全周)", del_id="2026-2027-1;30110012;1;"),
+    SelectedCourse(kind="任选", kch="02090091", kxh="92", name="高技术战争",
+                   time_text="5-6(单周)", del_id="2026-2027-1;02090091;92;"),
+]
+before = find_conflicts(TARGET_TIME, [(c.name, c.time_text) for c in SEL])
+check("不排除任何课时，撞上的那门会被报出来",
+      len(before) == 1 and "控制工程基础" in before[0])
+
+drop = CourseEntry(action="drop", kind="bx", name="控制工程基础", kch="30110012", kxh="1")
+kept = [c for c in SEL if not same_course(c, drop)]
+after = find_conflicts(TARGET_TIME, [(c.name, c.time_text) for c in kept])
+check("把那门课列进「要退的课」之后，不再报冲突", after, [])
+
+# 认课程的三条线索
+check("按课程号认得出来", same_course(SEL[0], CourseEntry(action="drop", kch="30110012")))
+check("只填课程名也认得出来", same_course(SEL[0], CourseEntry(action="drop", name="控制工程基础")))
+check("课程名 + 课序号认得出来",
+      same_course(SEL[0], CourseEntry(action="drop", name="控制工程基础", kxh="1")))
+check("课序号对不上就不算同一门",
+      same_course(SEL[0], CourseEntry(action="drop", name="控制工程基础", kxh="9")), False)
+check("cid 认得出来",
+      same_course(SEL[0], CourseEntry(action="drop", resolved_cid="2026-2027-1;30110012;1;")))
+check("不相干的课不会被误判", same_course(SEL[0], CourseEntry(action="drop", kch="99999999")), False)
+
+print()
+print("=" * 78)
 if FAIL:
     print(f"{FAIL} 项失败")
     sys.exit(1)

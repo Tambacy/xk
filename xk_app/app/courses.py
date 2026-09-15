@@ -105,10 +105,40 @@ def parse_weeks(time_text: str, total: int = 16) -> set[int]:
     return weeks
 
 
+def same_course(selected, entry) -> bool:
+    """判断一条「已选课程」是不是清单里某个条目所指的那门课。
+
+    清单条目的信息可能不全（学生常常只填一个课程名），所以三条线索
+    任一命中就算：
+      · 课程号一致
+      · 课程名包含 + 课序号一致（课序号没填就只看名字）
+      · 校验时拿到的 cid 与已选记录的 del_id 一致
+
+    校验冲突和运行时挑「让位课」用的是同一个判断，
+    分开写迟早会漂移成两套行为。
+    """
+    skch = str(getattr(selected, "kch", "") or "")
+    ekch = str(getattr(entry, "kch", "") or "")
+    if ekch and skch == ekch:
+        return True
+    ename = getattr(entry, "name", "") or ""
+    if ename and ename in (getattr(selected, "name", "") or ""):
+        ekxh = str(getattr(entry, "kxh", "") or "")
+        if not ekxh or str(getattr(selected, "kxh", "") or "") == ekxh:
+            return True
+    ecid = getattr(entry, "resolved_cid", "") or ""
+    if ecid and ecid == (getattr(selected, "del_id", "") or ""):
+        return True
+    return False
+
+
 def find_conflicts(target_time: str, others: Iterable[tuple[str, str]]) -> list[str]:
     """判断 target_time 与其它课程时间是否冲突。
 
     others 是 (课程名, 上课时间) 序列，返回冲突的课程名列表。
+
+    判据是「同一大节的同一小节」且「周次有交集」——
+    第 4 周周四第 1 节 和 第 5 周周四第 1 节 不算冲突。
     """
     t_slots = parse_slots(target_time)
     if not t_slots:

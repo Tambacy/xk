@@ -440,6 +440,11 @@ class MainWindow(QMainWindow):
         log.info("用户清除了本机保存的凭据（重置浏览器身份=%s）。", reset_profile)
 
     # ------------------------------------------------------------------
+    def _drop_entries(self) -> list:
+        """清单里所有「要退的课」。它们在抢课开始时先被退掉，
+        所以校验时间冲突时要排除掉（见 core.do_validate）。"""
+        return [e for e in self.entries if e.action == "drop"]
+
     def on_add_course(self, entry: CourseEntry):
         self.entries.append(entry)
         self.results[len(self.entries) - 1] = None
@@ -449,7 +454,7 @@ class MainWindow(QMainWindow):
         idx = len(self.entries) - 1
         snap = self.page_courses.selected_snapshot
         if self.core:
-            self.core.do_validate(idx, entry, snap)
+            self.core.do_validate(idx, entry, snap, self._drop_entries())
 
     def on_remove_course(self, index: int):
         if 0 <= index < len(self.entries):
@@ -459,13 +464,14 @@ class MainWindow(QMainWindow):
             self.cfg.set_courses(self.entries)
             self.save_config()
             self.page_courses.set_entries(self.entries, self.results)
+            drops = self._drop_entries()
             for i, e in enumerate(self.entries):
                 if self.core:
-                    self.core.do_validate(i, e, self.page_courses.selected_snapshot)
+                    self.core.do_validate(i, e, self.page_courses.selected_snapshot, drops)
 
     def on_validate(self, index: int, entry, snapshot):
         if self.core:
-            self.core.do_validate(index, entry, snapshot)
+            self.core.do_validate(index, entry, snapshot, self._drop_entries())
 
     def on_validated(self, index: int, result: dict):
         self.results[index] = result

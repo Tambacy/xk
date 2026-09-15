@@ -606,7 +606,7 @@ pre code{ background: none; color: inherit; padding: 0; }
   <span class="mark">清</span>
   <span>
     <span class="name">学校选课助手</span>
-    <span class="ver">v0.3.1</span>
+    <span class="ver">v0.3.2</span>
   </span>
 </div>
 
@@ -626,7 +626,7 @@ pre code{ background: none; color: inherit; padding: 0; }
   <div class="bg bg-night"></div>
   <div class="inner">
     <div class="sh">
-      <p class="eyebrow stag" style="--i:0">XK HELPER · v0.3.1</p>
+      <p class="eyebrow stag" style="--i:0">XK HELPER · v0.3.2</p>
       <h1 class="stag" style="--i:1">学校选课助手</h1>
       <p class="lead stag" style="--i:2">自动盯课余量、按预定时间抢课 —— 全程用真实浏览器操作，不做任何脚本化请求</p>
     </div>
@@ -718,7 +718,7 @@ pre code{ background: none; color: inherit; padding: 0; }
       <div class="rule stag" style="--i:2"></div>
     </div>
 
-    <div class="step stag" style="--i:3"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.3.1.exe</code>，一路下一步。</div></div>
+    <div class="step stag" style="--i:3"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.3.2.exe</code>，一路下一步。</div></div>
     <div class="step stag" style="--i:4"><div class="num">2</div><div>装完会自动创建开始菜单和桌面快捷方式。</div></div>
 
     <p class="stag" style="--i:5"><small>安装目录约 650 MB —— 里面有一整个 Chromium，所以比较大。默认装在 <code>%LOCALAPPDATA%\Programs\XkHelper</code>，不需要管理员权限。</small></p>
@@ -826,7 +826,8 @@ pre code{ background: none; color: inherit; padding: 0; }
         <ul class="stag" style="--i:6">
           <li>✅ <b>已定位</b> —— 找到了，右侧卡片显示课程号、课序号、上课时间、任课教师、当前课余量</li>
           <li>⚠️ <b>需补充</b> —— 同名课程有多个课堂，会列出各自的时间，需补课序号或上课时间</li>
-          <li>⚠️ <b>时间冲突</b> —— 和已选课程撞时间，卡片会标红并写明和哪门课冲突</li>
+          <li>⚠️ <b>时间冲突</b> —— 目标课和某门已选课程的上课时间撞了（同一个大节的同一小节，且周次有重叠；前八周和后八周不算撞）。卡片会标红，并说明抢到时<b>会自动把那门已选课程退掉</b>。<br>
+            如果那门课本就是你打算退掉的，把它加进「要退的课」即可 —— 那时它不再算作冲突</li>
           <li>❌ <b>未找到</b> —— 课程号 / 课程名可能有误，或本学期未开设该课</li>
         </ul>
         <div class="card tip stag" style="--i:7">
@@ -1143,7 +1144,7 @@ diagnostics\         导出的诊断包</pre>
   <div class="inner">
     <div class="sh">
       <p class="eyebrow stag" style="--i:0">XK HELPER</p>
-      <h1 class="stag" style="--i:1">学校选课助手 v0.3.1</h1>
+      <h1 class="stag" style="--i:1">学校选课助手 v0.3.2</h1>
       <p class="lead stag" style="--i:2">本说明随安装包一起分发</p>
     </div>
     <div class="meta stag" style="--i:3">

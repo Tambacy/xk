@@ -888,8 +888,15 @@ class CoursesPage(QWidget):
                     card.set_badge("已定位", "ok")
                     if r.get("conflicts"):
                         card.set_badge("时间冲突", "warn")
-                        card.set_state("⚠ 与已选课程时间冲突：" + "、".join(r["conflicts"]),
-                                       "warn")
+                        card.set_state(
+                            "⚠ 与已选课程时间冲突：" + "、".join(r["conflicts"]) +
+                            "　—— 抢到时会自动退掉它们", "warn")
+                    elif r.get("waived_conflicts"):
+                        # 本来会冲突，但那门课已列在「要退的课」里 —— 届时要让位，
+                        # 所以不算冲突。说出来，用户才知道设置真的生效了。
+                        card.set_state(
+                            "会和「" + "、".join(r["waived_conflicts"]) +
+                            "」撞时间，但它已在要退的课里，界面上不计为冲突。", "info")
                 elif r.get("ambiguous"):
                     card.set_badge("需补充", "warn")
                     card.set_state(r.get("reason", ""), "warn")
