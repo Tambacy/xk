@@ -61,11 +61,11 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 
 [Files]
 ; ---- 升级时清掉旧版本的可执行文件 ----
-; 程序改过名字（XkHelper.exe -> XkHelper.exe）。AppId 没变，所以 Inno 会把它
-; 当成同一次升级、装回原来的目录 —— 但旧 exe 会留在那里成为孤儿。
-; 桌面/开始菜单的快捷方式指向新名字，功能上没问题，只是留个没用的文件不好看。
+; 程序改过名字，旧版装的是 THUXkHelper.exe。AppId 没变，所以 Inno 会把它当成
+; 同一次升级、装回原来的目录 —— 但旧 exe 会留在那里成为孤儿。这里显式删掉它。
+; （删的是**旧名字**那个文件；这里要是写成新名字，等于让安装程序删掉自己。）
 [InstallDelete]
-Type: files; Name: "{app}\XkHelper.exe"
+Type: files; Name: "{app}\THUXkHelper.exe"
 
 [Files]
 ; ---- 程序本体 ----

@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """验证凭据加密存储与日志脱敏（不联网、不碰真实账号）。"""
 import logging
 import shutil
@@ -134,6 +134,51 @@ with zipfile.ZipFile(zpath) as z:
     check("诊断包里的学号已脱敏", "2020000000" in envtxt, False)
     check("诊断包里的密码已脱敏", "MySecretPwd!2026" in envtxt, False)
     check("业务日志已打入包", any("helper" in n for n in names))
+
+print()
+print("=" * 70)
+print("【N】向后兼容：改名不能把老用户的凭据/数据弄丢")
+print("=" * 70)
+# 这两条是被一次「全局字符串替换」真实弄坏过的：
+#   1. DPAPI 的熵（entropy）是密钥的一部分。把旧标识换成新标识等于换了一把
+#      钥匙 —— 老用户磁盘上那份 credentials.dat 直接解不开。
+#   2. 数据目录改名后要能找到旧目录并搬过来。旧名常量被一并替换成新名之后，
+#      「迁移」就成了把 X 搬到 X 的空操作，升级后凭据凭空「消失」。
+# 这类破坏是静默的：不报错、不崩溃，只是东西读不出来了。
+
+from app.config import (APP_DIR_NAME, OLD_APP_DIR_NAME,   # noqa: E402
+                        migrate_legacy_root)
+from app.secretstore import ENTROPY, LEGACY_ENTROPY       # noqa: E402
+
+check("旧目录名与新目录名不同", OLD_APP_DIR_NAME != APP_DIR_NAME, True)
+check("旧熵与新熵不同", LEGACY_ENTROPY != ENTROPY, True)
+
+# DPAPI：用旧熵加密的数据，必须还能解开
+old_blob = dpapi_protect(b"legacy-payload", entropy=LEGACY_ENTROPY)
+try:
+    check("用旧熵加密的数据仍能解开",
+          dpapi_unprotect(old_blob), b"legacy-payload")
+except Exception as e:
+    print(f"      {type(e).__name__}: {e}")
+    check("用旧熵加密的数据仍能解开", False, True)
+check("用新熵加密的数据能解开",
+      dpapi_unprotect(dpapi_protect(b"new-payload")), b"new-payload")
+
+_m = Path(tempfile.mkdtemp())
+try:
+    (_m / OLD_APP_DIR_NAME).mkdir()
+    (_m / OLD_APP_DIR_NAME / "credentials.dat").write_bytes(b"x")
+    (_m / OLD_APP_DIR_NAME / "config.json").write_text("{}", encoding="utf-8")
+    ok = migrate_legacy_root(_m)
+    check("迁移返回成功", bool(ok), True)
+    check("凭据搬到了新目录",
+          (_m / APP_DIR_NAME / "credentials.dat").exists(), True)
+    check("配置也搬过去了",
+          (_m / APP_DIR_NAME / "config.json").exists(), True)
+    check("旧目录已不在", (_m / OLD_APP_DIR_NAME).exists(), False)
+    check("重复迁移是幂等的", bool(migrate_legacy_root(_m)), True)
+finally:
+    shutil.rmtree(_m, ignore_errors=True)
 
 print()
 print("=" * 70)

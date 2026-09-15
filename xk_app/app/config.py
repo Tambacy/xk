@@ -31,7 +31,10 @@ from typing import Any
 
 
 APP_DIR_NAME = "XkHelper"
-OLD_APP_DIR_NAME = "XkHelper"      # 改名前的目录，只用于一次性迁移
+# 改名前的数据目录名。**这个常量必须如实写出来** —— 「自动迁移」这件事的
+# 全部意义就是找到旧目录并搬过来，不写旧名字就无从找起。
+# 它记录的是一个历史事实，不是产品文案。
+OLD_APP_DIR_NAME = "THUXkHelper"
 APP_DISPLAY_NAME = "选课助手"
 APP_VERSION = "0.4.0"
 

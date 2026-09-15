@@ -49,7 +49,17 @@ def _dpapi_available() -> bool:
     return sys.platform == "win32"
 
 
-def dpapi_protect(data: bytes, entropy: bytes = b"XkHelper") -> bytes:
+# DPAPI 的额外熵。**这个值一改，已经加密保存的凭据就全部解不开了** ——
+# 它是密钥的一部分，不是可以随手改的文案。
+#
+# `LEGACY_ENTROPY` 是程序改名前用过的值。老用户升级上来时，磁盘上的
+# `credentials.dat` 还是用旧熵加密的；解密时依次试一遍，才能把密码读回来。
+# 所以下面这个常量**必须如实写出来** —— 它记录的是一个历史事实。
+ENTROPY = b"XkHelper"
+LEGACY_ENTROPY = b"THUXkHelper"
+
+
+def dpapi_protect(data: bytes, entropy: bytes = ENTROPY) -> bytes:
     """把数据加密成只有当前用户能解开的密文。"""
     if not _dpapi_available():
         raise RuntimeError("当前系统不支持 DPAPI")
@@ -70,7 +80,26 @@ def dpapi_protect(data: bytes, entropy: bytes = b"XkHelper") -> bytes:
         kernel32.LocalFree(blob_out.pbData)
 
 
-def dpapi_unprotect(data: bytes, entropy: bytes = b"XkHelper") -> bytes:
+def dpapi_unprotect(data: bytes, entropy: bytes = ENTROPY) -> bytes:
+    """解密。先用当前熵，失败再试改名前的旧熵。
+
+    为什么要回退：老用户升级上来时，磁盘上的 `credentials.dat` 还是用旧熵
+    加密的。不试一下旧值，程序会以为「解不开 = 换了电脑」，用户就得重新输密码 ——
+    明明东西就在那儿。
+    """
+    ents = [entropy]
+    if entropy == ENTROPY and LEGACY_ENTROPY != ENTROPY:
+        ents.append(LEGACY_ENTROPY)
+    last = None
+    for ent in ents:
+        try:
+            return _dpapi_unprotect_once(data, ent)
+        except Exception as e:      # noqa: BLE001 —— 换下一个熵继续试
+            last = e
+    raise last if last else RuntimeError("CryptUnprotectData 失败")
+
+
+def _dpapi_unprotect_once(data: bytes, entropy: bytes) -> bytes:
     if not _dpapi_available():
         raise RuntimeError("当前系统不支持 DPAPI")
     crypt32 = ctypes.windll.crypt32
