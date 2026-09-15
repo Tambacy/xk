@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 使用说明（先看这个）
+    url: https://github.com/Tambacy/xk/blob/main/xk_app/docs/使用说明.html
+    about: 19 屏的图文说明，覆盖安装、登录、三种模式、故障排查与常见问题
+
+  - name: 安全相关的问题
+    url: https://github.com/Tambacy/xk/security/advisories/new
+    about: 涉及凭据、隐私或其它安全问题，请走私密渠道，不要开公开 Issue
+
+  - name: 使用前必读
+    url: https://github.com/Tambacy/xk/blob/main/DISCLAIMER.md
+    about: 使用范围与风险说明，请先确认你所在学校是否允许

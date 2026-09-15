@@ -1,0 +1,38 @@
+name: 功能建议
+description: 想要某个功能，或者觉得哪里可以更好
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先说一句：这是一个**个人项目**，只对特定的一套选课系统有效，
+        作者按自己的节奏维护。建议不一定会被采纳，但都会看。
+
+        > 请不要提「支持我们学校的选课系统」—— 这需要重写全部页面逻辑，
+        > 不在本项目的范围内。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的是什么问题
+      description: 先说场景，再说你希望的方案。有具体场景的建议更容易被采纳。
+      placeholder: |
+        我在……的时候，需要……，但现在只能……
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你希望的方案
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我确认这条建议与「支持其它学校」无关
+          required: true

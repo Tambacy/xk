@@ -17,22 +17,26 @@
 >
 > 完整条款见 **[免责声明](DISCLAIMER.md)** 与 **[许可协议](LICENSE)**。
 
+![预定课程](xk_app/docs/screenshots/3-courses.png)
+
 ## 下载
 
 到 [**Releases**](https://github.com/Tambacy/xk/releases) 页面下载：
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `XkHelper-Setup-0.4.2.exe` | 334 MB | 安装包，推荐。自包含，装完即用 |
-| `XkHelper-v0.4.2-source.zip` | 1482 KB | 源码，自行修改或构建用 |
+| `XkHelper-Setup-0.4.3.exe` | 334 MB | 安装包，推荐。自包含，装完即用 |
+| `XkHelper-v0.4.3-source.zip` | 1477 KB | 源码，自行修改或构建用 |
 
 安装包体积大是因为内置了一整个 Chromium（解压后约 426 MB）—— 程序需要真实浏览器
 才能以真实事件操作页面，而不是发送脚本化的 HTTP 请求。
 
-![登录](xk_app/docs/screenshots/1-login.png)
-
 <details>
 <summary>更多界面截图</summary>
+
+**登录**
+
+![登录](xk_app/docs/screenshots/1-login.png)
 
 **选择运行模式**
 
@@ -88,7 +92,7 @@
 ```powershell
 cd xk_app
 powershell -ExecutionPolicy Bypass -File build.ps1
-# 产物：installer\XkHelper-Setup-0.4.2.exe（约 330 MB，自包含）
+# 产物：installer\XkHelper-Setup-0.4.3.exe（约 330 MB，自包含）
 ```
 
 依赖：Python 3.13、PySide6、playwright、PyInstaller、Inno Setup 6。
@@ -241,6 +245,38 @@ cd xk_app
 - GBK 控制台输出 emoji 会抛 `UnicodeEncodeError`，在 windowed 模式下表现为静默崩溃
 - 系统 Edge 会触发二次认证，Playwright 自带的 Chromium 不会，因此安装包必须
   内置浏览器
+
+---
+
+## 许可与使用范围
+
+本项目**不是开源软件**。
+
+代码公开可读，但 [LICENSE](LICENSE) 是一份**自定义的非商业许可**，未获 OSI 认可。
+和常见的开源许可相比，它多了这些限制：
+
+| | MIT / Apache 等开源许可 | 本项目的许可 |
+|---|---|---|
+| 商业使用 | 允许 | **禁止**（含收费代抢、有偿分享、打包售卖） |
+| 作为服务提供给他人 | 允许 | **禁止** |
+| 再分发安装包 | 允许 | **禁止**（分享请给出仓库链接） |
+| 阅读、编译、修改源码 | 允许 | 允许 |
+| 在本人账号上使用 | 允许 | 允许 |
+
+也就是说：**源码可以看、可以自己改了用，但不要拿去商用、不要替别人抢、不要把安装包转出去。**
+
+这么定是因为这个工具直接操作学校的教务系统 —— 它被一个人用和被一群人用，
+性质完全不同。作者不打算为后一种情况负责，也不想让它变成一门生意。
+
+### 关于贡献
+
+Issues 欢迎提（bug、建议都行）。**Pull Request 请先开 Issue 讨论** ——
+这个项目有明确的取舍（见 [免责声明](DISCLAIMER.md) 与上面的使用范围），
+不讨论就写的大改动很可能方向不对。
+
+### 支持范围
+
+只维护**最新版本**。历史版本不再单独出补丁。
 
 ---
 

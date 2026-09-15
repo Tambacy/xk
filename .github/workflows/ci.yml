@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 说明：
+#   三个离线测试（凭据存储与日志脱敏、抢课安全护栏、二次验证流程）不依赖
+#   浏览器和网络，是最稳的一道防线，作为必过项。
+#   界面渲染测试会真的创建窗口并截图，对运行环境有要求，先标成
+#   continue-on-error —— 能在 CI 上跑通更好，跑不通也不该挡住合并。
+#
+#   故意**没有**跑 test_scheduler.py：它需要真实账号登录教务系统，
+#   不适合放进 CI。
+
+jobs:
+  offline-tests:
+    name: 离线回归测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6
+
+      - name: 语法检查
+        working-directory: xk_app
+        run: python -m compileall -q app main.py _creds.py
+
+      - name: 凭据存储与日志脱敏
+        working-directory: xk_app
+        run: python test_security_logging.py
+
+      - name: 抢课安全护栏
+        working-directory: xk_app
+        run: python test_selection_guard.py
+
+      - name: 二次验证流程
+        working-directory: xk_app
+        run: python test_second_factor.py
+
+  gui-smoke:
+    name: 界面渲染
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PySide6
+
+      - name: 渲染全部页面
+        working-directory: xk_app
+        run: python test_gui_smoke.py
+
+      - name: 保存截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: xk_app/shots/
+          if-no-files-found: ignore
