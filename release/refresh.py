@@ -24,7 +24,7 @@ for _s in ("stdout", "stderr"):
 REPO = "Tambacy/xk"
 TAG = "v0.2.0"
 NAME = "v0.2.0 二次验证流程修复与抢课校验"
-ROOT = Path(r"E:\Test_Project")
+ROOT = Path(__file__).resolve().parent.parent      # 从脚本位置推导，别写死本机路径
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
     ROOT / "release" / "XkHelper-v0.2.0-source.zip",
