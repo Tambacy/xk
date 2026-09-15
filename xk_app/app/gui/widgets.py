@@ -34,14 +34,22 @@ def repolish(w: QWidget):
     w.update()
 
 
-def clear_layout(lay, keep_tail: int = 0):
-    """清空布局里的控件。
+def clear_layout(lay, keep_tail: int = 0, keep_head: int = 0):
+    """清空布局里的控件，保留最前面 keep_head 个 / 最后面 keep_tail 个。
+
+    ⚠ 这两个参数别用混：
+      · `Card` 的**标题在最前面** —— 「只清内容、留下标题」要用 `keep_head=1`
+      · 列表末尾放的通常是 `addStretch(1)` —— 那种要 `keep_tail=1`
+
+    这里踩过坑：目标课程卡片用 `keep_tail=1` 想留下标题，结果留下的是
+    **最后一条课程**，于是每重跑一次就多留一行旧课程 —— 界面上看起来
+    就像同一门课要抢两次。
 
     必须 setParent(None) 再 deleteLater()：deleteLater 是异步的，
     只调它的话旧控件在事件循环跑起来之前仍然可见，快速重建时会看到重影。
     """
-    while lay.count() > keep_tail:
-        item = lay.takeAt(0)
+    while lay.count() > keep_head + keep_tail:
+        item = lay.takeAt(keep_head)
         w = item.widget()
         if w is not None:
             w.setParent(None)

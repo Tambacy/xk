@@ -1179,7 +1179,8 @@ class MonitorPage(QWidget):
         self.st_run.set("00:00:00", animate=False)
         self.st_next.set("—", animate=False)
         self.set_state("preparing", "准备中", "正在启动浏览器并登录…")
-        clear_layout(self.card_courses.body, keep_tail=1)
+        # keep_head=1：卡片标题在最前面，要留下的是它（不是最后一条课程）
+        clear_layout(self.card_courses.body, keep_head=1)
         self.course_labels = []
         for e in entries:
             prefix = "退　" if e.action == "drop" else "抢　"

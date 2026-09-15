@@ -15,7 +15,7 @@ except Exception:
     pass
 
 from PySide6.QtCore import Qt, QTimer, QDateTime
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 from PySide6.QtGui import QFont
 
 from app.config import Paths, CourseEntry
@@ -242,6 +242,54 @@ try:
     app.processEvents()
 finally:
     shutil.rmtree(_tmp_home, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# 监控页「目标课程」反复重跑不能留旧行
+#
+# 用户报过：停止监听 → 返回设置 → 再跑一次之后，同一门课在卡片里出现了两次，
+# 看着像要抢两次。
+#
+# 根因是 `clear_layout(..., keep_tail=1)` —— 想留下的是**卡片标题**，
+# 但标题在 body 的**最前面**，而 keep_tail 保留的是最后 N 个。于是留下的
+# 是最后一条课程，标题反被删掉；每重跑一次就多留一行旧课程。
+# 断言里连标题一起比，就是为了守住「留下的必须是标题」这一点。
+# ---------------------------------------------------------------------------
+print()
+print("=" * 60)
+print("监控页目标课程：反复重跑不留旧行")
+print("=" * 60)
+
+
+def _card_rows(card):
+    """卡片 body 里所有 QLabel 的文本，按界面顺序（含标题）。"""
+    out = []
+    for _i in range(card.body.count()):
+        _w = card.body.itemAt(_i).widget()
+        if isinstance(_w, QLabel):
+            out.append(_w.text())
+    return out
+
+
+def _expect(es):
+    return ["目标课程"] + [("退　" if e.action == "drop" else "抢　") + e.label()
+                           for e in es]
+
+
+_mp = win.page_monitor
+for _i, _case in enumerate((entries, entries[:2], [entries[1]], [])):
+    _mp.reset(list(_case))
+    app.processEvents()
+    _got = _card_rows(_mp.card_courses)
+    _want = _expect(_case)
+    assert _got == _want, (f"第 {_i + 1} 次 reset 后卡片内容不对\n"
+                           f"  实际={_got}\n  期望={_want}")
+    print(f"  reset #{_i + 1}（{len(_case)} 门）行数与内容正确  PASS")
+
+# 顺手确认标题没被吃掉 —— 这正是原 bug 的第二个症状
+_mp.reset(list(entries))
+app.processEvents()
+assert _card_rows(_mp.card_courses)[0] == "目标课程", "卡片标题丢了"
+print("  卡片标题仍在                    PASS")
 
 print()
 print("OK")
