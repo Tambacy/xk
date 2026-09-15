@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import math
 import random
+import time
 
 from PySide6.QtCore import (QEasingCurve, QObject, QPoint, QPointF, QRect,
                             QRectF, QTimer, QVariantAnimation, Qt)
 from PySide6.QtGui import (QColor, QImage, QLinearGradient, QPainter, QPixmap,
-                           QRadialGradient)
+                           QRadialGradient, QRegion)
 from PySide6.QtWidgets import QWidget
 
 from .theme import C, D_PAGE
@@ -52,7 +53,7 @@ class RevealCurtain(QWidget):
       · 两层都画在同一个控件里：真实页面就在幕布下面，分开画会露出底下的内容
     """
 
-    DURATION = 480
+    DURATION = 620
     BAND = 0.19          # 羽化带占半径的比例。太大整屏会糊成一团雾
     MASK_DIV = 3         # 遮罩降采样倍数
 
@@ -62,33 +63,75 @@ class RevealCurtain(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self._old = None
         self._new = None
+        self._old_pos = QPoint(0, 0)
+        self._new_pos = QPoint(0, 0)
         self._p = 0.0
+        self._prev_r = 0.0
         self._ps = []
         self._bg = QColor(C["bg"])
+        # 每帧要用的两块位图缓存起来复用。每帧新建一张 1120×760 的 QImage
+        # 是 3.4MB，60fps 就是 200MB/s 的分配/回收 —— 掉帧就是这么来的。
+        self._mask = None
+        self._comp = None
+        self._cache_size = (0, 0)
         self.hide()
 
-        self.anim = QVariantAnimation(self)
-        self.anim.setDuration(self.DURATION)
-        self.anim.setEasingCurve(QEasingCurve.InOutCubic)
-        self.anim.valueChanged.connect(self._on)
-        self.anim.finished.connect(self._done)
+        # 自己用 QTimer 驱动，不用 QVariantAnimation 内部那个定时器：
+        # 后者的间隔不稳定，实测 480ms 只跑到 21 帧、单帧进度能跳 0.14
+        # （约 68ms 的停顿），看起来就是「帧数不够、一顿一顿」。
+        self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
+        self._timer.setInterval(15)
+        self._timer.timeout.connect(self._tick)
+        self._t0 = 0.0
 
     def _done(self):
         self._ps = []
         self.hide()
 
     # -- 生命周期 ------------------------------------------------------
-    def play(self, old: QPixmap, new: QPixmap, geo: QRect, reverse: bool = False):
+    def play(self, old: QPixmap, new: QPixmap, geo: QRect,
+             old_pos: QPoint = None, new_pos: QPoint = None,
+             reverse: bool = False):
         self._old, self._new = old, new
+        self._old_pos = QPoint(old_pos) if old_pos is not None else QPoint(0, 0)
+        self._new_pos = QPoint(new_pos) if new_pos is not None else QPoint(0, 0)
         self._ps = []
         self._p = 0.0
+        self._prev_r = 0.0
         self.setGeometry(geo)
         self.raise_()
         self.show()
-        self.anim.stop()
-        self.anim.setStartValue(0.0)
-        self.anim.setEndValue(1.0)
-        self.anim.start()
+        self._timer.stop()
+        self._t0 = time.perf_counter()
+        self.update()               # 首帧整屏重画一次，之后只重画环带
+        self._timer.start()
+
+    @staticmethod
+    def _ease(t: float) -> float:
+        """InOutCubic。"""
+        if t < 0.5:
+            return 4.0 * t * t * t
+        return 1.0 - pow(-2.0 * t + 2.0, 3) / 2.0
+
+    def _tick(self):
+        el = (time.perf_counter() - self._t0) * 1000.0
+        t = el / float(self.DURATION)
+        done = t >= 1.0
+        self._on(self._ease(min(1.0, max(0.0, t))))
+        if done:
+            self._timer.stop()
+            self._done()
+
+    def _buffers(self, w: int, h: int):
+        """按需分配、跨帧复用。尺寸没变就不重新分配。"""
+        mw = max(24, w // self.MASK_DIV)
+        mh = max(24, h // self.MASK_DIV)
+        if self._cache_size != (w, h) or self._mask is None:
+            self._mask = QImage(mw, mh, QImage.Format_ARGB32_Premultiplied)
+            self._comp = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+            self._cache_size = (w, h)
+        return mw, mh
 
     def _max_r(self) -> float:
         """盖住四个角所需的半径。"""
@@ -101,6 +144,9 @@ class RevealCurtain(QWidget):
         t = float(v)
         r = self._radius(t)
         cx, cy = self.width() / 2.0, self.height() / 2.0
+        if self._new_pos is not None:
+            cx = self._new_pos.x() + self.width() / 2.0
+            cy = self._new_pos.y() + self.height() / 2.0
 
         # 沿揭示边缘撒粒子
         if t < 0.98:
@@ -130,69 +176,131 @@ class RevealCurtain(QWidget):
         self._ps = alive[-260:]
 
         self._p = t
-        self.update()
+        self.update(self._dirty_region(r, cx, cy))
+        self._prev_r = r
+
+    def _dirty_region(self, r: float, cx: float, cy: float) -> QRegion:
+        """这一帧真正变了的地方：圆环带 + 粒子所占范围。
+
+        整屏重画在这里是**几十毫秒**级别的开销 —— 1.5 倍缩放下后台缓冲是
+        1680×1140（7.7MB），每帧都要重画并上屏。实测定时器设 15ms，
+        实际 59ms 才走一帧，掉到 17fps，看起来就是一顿一顿。
+        揭示动画每帧其实只有一圈窄环在变，把重画范围收到环带 + 粒子即可。
+        """
+        band = r * self.BAND
+        pad = int(band * 2.2) + 26
+        outer = QRegion(QRect(int(cx - r - pad), int(cy - r - pad),
+                              int(2 * (r + pad)) + 1, int(2 * (r + pad)) + 1),
+                        QRegion.Ellipse)
+        inner_r = self._prev_r - pad
+        if inner_r > 2:
+            outer = outer.subtracted(
+                QRegion(QRect(int(cx - inner_r), int(cy - inner_r),
+                              int(2 * inner_r) + 1, int(2 * inner_r) + 1),
+                        QRegion.Ellipse))
+        if self._ps:
+            xs = [q["x"] for q in self._ps]
+            ys = [q["y"] for q in self._ps]
+            outer = outer.united(
+                QRect(int(min(xs)) - 10, int(min(ys)) - 10,
+                      int(max(xs) - min(xs)) + 20, int(max(ys) - min(ys)) + 20))
+        return outer
 
     # -- 绘制 ----------------------------------------------------------
     def paintEvent(self, e):
-        if self._old is None:
-            return
-        p = QPainter(self)
-        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         w, h = self.width(), self.height()
         if w <= 0 or h <= 0:
             return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-        p.drawPixmap(0, 0, self._old)
+        # 兜底先铺一层页面底色。控件是 WA_NoSystemBackground，
+        # 没画到的地方会露出未初始化内容（在 Windows 上就是**大片黑色**）。
+        # 两页高度可能不同（登录页不显示顶部天幕条，比其它页高整整一条带子），
+        # 所以「没画到的地方」是常态，不是异常。
+        p.fillRect(0, 0, w, h, self._bg)
+        if self._old is None or self._old.isNull():
+            return
+        p.drawPixmap(self._old_pos, self._old)
 
         t = self._p
-        if t > 0.002 and self._new is not None:
-            r = self._radius(t)
-            mw = max(24, w // self.MASK_DIV)
-            mh = max(24, h // self.MASK_DIV)
+        if self._new is None or self._new.isNull():
+            return
 
-            # 低分辨率的径向遮罩
-            mask = QImage(mw, mh, QImage.Format_ARGB32_Premultiplied)
-            mask.fill(0)
-            mp = QPainter(mask)
-            mp.setRenderHint(QPainter.Antialiasing, True)
-            rg = QRadialGradient(mw / 2.0, mh / 2.0, max(1.0, r / self.MASK_DIV))
-            rg.setColorAt(0.0, QColor(0, 0, 0, 255))
-            solid = max(0.0, 1.0 - self.BAND)
-            rg.setColorAt(solid, QColor(0, 0, 0, 255))
-            rg.setColorAt(1.0, QColor(0, 0, 0, 0))
-            mp.fillRect(0, 0, mw, mh, rg)
-            mp.end()
+        if t > 0.97:
+            # 已经铺满，直接整幅画上去，省掉一次离屏合成
+            p.drawPixmap(self._new_pos, self._new)
+            self._draw_particles(p)
+            return
+        if t <= 0.002:
+            self._draw_particles(p)
+            return
 
-            # 新页按遮罩抠出来（新页保持原分辨率）
-            tmp = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
-            tmp.fill(0)
-            tp = QPainter(tmp)
-            tp.setRenderHint(QPainter.SmoothPixmapTransform, True)
-            tp.drawPixmap(0, 0, self._new)
-            tp.setCompositionMode(QPainter.CompositionMode_DestinationIn)
-            tp.drawImage(QRect(0, 0, w, h), mask)
-            tp.end()
-            p.drawImage(0, 0, tmp)
+        cx = self._new_pos.x() + w / 2.0
+        cy = self._new_pos.y() + h / 2.0
+        r = self._radius(t)
+        edge = max(1.0, r)
 
-            # 边缘一圈柔光：窄一点、亮一点，是「化开的那条边」而不是一片雾
-            edge = max(1.0, r)
-            gg = QRadialGradient(w / 2.0, h / 2.0, edge)
-            gg.setColorAt(max(0.0, 1.0 - self.BAND * 2.2), QColor(196, 178, 240, 0))
-            gg.setColorAt(max(0.0, 1.0 - self.BAND * 0.75), QColor(222, 210, 255, 120))
-            gg.setColorAt(1.0, QColor(167, 140, 230, 0))
-            p.setPen(Qt.NoPen)
-            p.setBrush(gg)
-            p.drawEllipse(QPointF(w / 2.0, h / 2.0), edge, edge)
+        # 只在这一块矩形里干活 —— 前 60% 的时间里圆还很小，
+        # 全屏合成是纯浪费（实测占掉大半的绘制时间）。
+        bx = max(0, int(cx - edge - 4))
+        by = max(0, int(cy - edge - 4))
+        bw = min(w, int(cx + edge + 4)) - bx
+        bh = min(h, int(cy + edge + 4)) - by
+        if bw <= 0 or bh <= 0:
+            return
+        clip = QRect(bx, by, bw, bh)
 
-        # 粒子
-        if self._ps:
-            p.setPen(Qt.NoPen)
-            for q in self._ps:
-                c = QColor(C["primary_2"])
-                c.setAlpha(int(235 * max(0.0, q["life"]) ** 1.2))
-                p.setBrush(c)
-                rr = q["r"] * (0.35 + q["life"] * 0.95)
-                p.drawEllipse(QRectF(q["x"] - rr, q["y"] - rr, rr * 2, rr * 2))
+        mw, mh = self._buffers(w, h)
+        k = float(self.MASK_DIV)
+
+        # 低分辨率的径向遮罩（复用缓存）
+        self._mask.fill(0)
+        mp = QPainter(self._mask)
+        mp.setRenderHint(QPainter.Antialiasing, True)
+        rg = QRadialGradient(cx / k, cy / k, max(1.0, edge / k))
+        rg.setColorAt(0.0, QColor(0, 0, 0, 255))
+        solid = max(0.0, 1.0 - self.BAND)
+        rg.setColorAt(solid, QColor(0, 0, 0, 255))
+        rg.setColorAt(1.0, QColor(0, 0, 0, 0))
+        mp.setClipRect(QRect(int(bx / k), int(by / k),
+                             max(1, int(bw / k) + 1), max(1, int(bh / k) + 1)))
+        mp.fillRect(0, 0, mw, mh, rg)
+        mp.end()
+
+        # 新页按遮罩抠出来（新页保持原分辨率，只有遮罩是低分辨率的）
+        comp = self._comp
+        comp.fill(0)
+        tp = QPainter(comp)
+        tp.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        tp.setClipRect(clip)
+        tp.drawPixmap(self._new_pos, self._new)
+        tp.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+        tp.drawImage(QRect(0, 0, w, h), self._mask)
+        tp.end()
+        p.drawImage(clip, comp, clip)
+
+        # 边缘一圈柔光：窄一点、亮一点，是「化开的那条边」而不是一片雾
+        gg = QRadialGradient(cx, cy, edge)
+        gg.setColorAt(max(0.0, 1.0 - self.BAND * 2.2), QColor(196, 178, 240, 0))
+        gg.setColorAt(max(0.0, 1.0 - self.BAND * 0.75), QColor(222, 210, 255, 120))
+        gg.setColorAt(1.0, QColor(167, 140, 230, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(gg)
+        p.drawEllipse(QPointF(cx, cy), edge, edge)
+
+        self._draw_particles(p)
+
+    def _draw_particles(self, p: QPainter):
+        if not self._ps:
+            return
+        p.setPen(Qt.NoPen)
+        for q in self._ps:
+            c = QColor(C["primary_2"])
+            c.setAlpha(int(235 * max(0.0, q["life"]) ** 1.2))
+            p.setBrush(c)
+            rr = q["r"] * (0.35 + q["life"] * 0.95)
+            p.drawEllipse(QRectF(q["x"] - rr, q["y"] - rr, rr * 2, rr * 2))
 
 
 # ==========================================================================

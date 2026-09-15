@@ -170,28 +170,32 @@ class MainWindow(QMainWindow):
     def goto(self, index: int):
         changed = self.stack.currentIndex() != index
         reverse = changed and index < self.stack.currentIndex()
-        snap_old = snap_new = None
-        geo = None
-        if changed and self.isVisible() and motion.ENABLED:
-            old = self.stack.currentWidget()
-            if old is not None and old.width() > 0 and old.height() > 0:
-                snap_old = old.grab()
-                geo = QRect(self.stack.mapTo(self.centralWidget(), QPoint(0, 0)),
-                            self.stack.size())
+        want_fx = changed and self.isVisible() and motion.ENABLED
+
+        # 抓的是**整个中央控件**，不是单独某一页。
+        # 只抓 stack 的话，顶部天幕条（它是 stack 的兄弟控件，而且会随页面
+        # 出现 / 消失、步骤导轨也会变）就不在新页快照里 —— 揭示到那一条时
+        # 露出来的还是旧页内容，看起来就是「两张页面互相透视」。
+        old_pm = self.centralWidget().grab() if want_fx else None
+
         self.stack.setCurrentIndex(index)
         self.steps.set_current(index)
         # 登录页整屏是天幕品牌分栏，顶上的天幕条会让两片深色撞在一起
         self.band.setVisible(index != 0)
         self.band.set_variant(self.SKY_VARIANTS[index % len(self.SKY_VARIANTS)])
-        # 翻页：新页先抓一张快照，和旧页一起交给幕布做滑出 / 滑入
-        if snap_old is not None and motion.ENABLED:
-            cur = self.stack.currentWidget()
-            if cur is not None and cur.width() > 0 and cur.height() > 0:
-                snap_new = cur.grab()
-        if snap_old is not None and snap_new is not None:
+
+        # 关键：先把布局跑完再抓新页。天幕条显示 / 隐藏会改变 stack 的高度，
+        # 不强制 layout 的话抓到的还是切换前的尺寸。
+        lay = self.centralWidget().layout()
+        if lay is not None:
+            lay.activate()
+
+        if want_fx and old_pm is not None:
+            new_pm = self.centralWidget().grab()
             if self.curtain is None:
                 self.curtain = RevealCurtain(self.centralWidget())
-            self.curtain.play(snap_old, snap_new, geo, reverse=reverse)
+            self.curtain.play(old_pm, new_pm, self.centralWidget().rect(),
+                              reverse=reverse)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
             self.page_courses.set_headless(self.cfg.headless)
