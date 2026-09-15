@@ -22,7 +22,7 @@ for _s in ("stdout", "stderr"):
 
 REPO = "Tambacy/xk"
 TAG = "v0.3.0"
-NAME = "v0.3.0 界面改版与监控页滚动修复"
+NAME = "v0.3.0 界面改版与交互修复"
 ROOT = Path(r"E:\Test_Project")
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
