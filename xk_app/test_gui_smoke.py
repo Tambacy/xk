@@ -71,6 +71,11 @@ win.goto(1)
 shot("2-mode")
 
 # 3 课程页（塞几门样例课程，覆盖各种状态）
+#
+# ⚠ 这里的冲突**必须用真实逻辑算出来**，不能手写。
+# 之前这里写死了 conflicts=["控制工程基础（4-2(全周)）"]，而目标是 5-6(单周) ——
+# 两者根本不撞，真实 find_conflicts 永远返回空。于是 README 的截图里
+# 出现了一个「不可能的冲突」，谁看谁困惑。
 win.cfg.mode = 3
 entries = [
     CourseEntry(action="grab", kind="ty", name="三年级男生乒乓球", kch="10721071",
@@ -86,14 +91,46 @@ entries = [
                 resolved_time="3-4(全周)", resolved_cid="2026-2027-1;10726031;2;"),
 ]
 win.entries = entries
+
+from app.browser import SelectedCourse
+from app.courses import find_conflicts, same_course
+
+# 本学期的已选课程（真实形状的对象，不是占位符 —— 否则列表里会显示成「[—] -」）
+SELECTED = [
+    SelectedCourse(kind="必修", kch="30110012", kxh="1", name="控制工程基础",
+                   time_text="5-6(全周)", teacher="王丹",
+                   del_id="2026-2027-1;30110012;1;"),
+    SelectedCourse(kind="必修", kch="10421055", kxh="3", name="大学物理",
+                   time_text="2-3(全周)", teacher="李强",
+                   del_id="2026-2027-1;10421055;3;"),
+    SelectedCourse(kind="限选", kch="02090080", kxh="1", name="信号与系统",
+                   time_text="1-2(全周)", teacher="张伟",
+                   del_id="2026-2027-1;02090080;1;"),
+    SelectedCourse(kind="体育课", kch="10726031", kxh="2", name="三年级男生冰球",
+                   time_text="3-4(全周)", teacher="许跃昊",
+                   del_id="2026-2027-1;10726031;2;"),
+]
+
+
+def real_conflicts(entry):
+    """按 core._handle_validate 的同一套规则算冲突：排除掉「要退的课」。"""
+    drops = [e for e in entries if e.action == "drop"]
+    kept = [c for c in SELECTED if not any(same_course(c, d) for d in drops)]
+    return find_conflicts(entry.resolved_time,
+                          [(c.name, c.time_text) for c in kept])
+
+
 win.results = {
     0: {"ok": True, "rows": [{"kyl": 0, "queue": "", "note": "限:2023男生选课"}]},
-    1: {"ok": True, "conflicts": ["控制工程基础（4-2(全周)）"],
+    # 高技术战争 5-6(单周) 撞上已选的 控制工程基础 5-6(全周)（单周与全周有交集）
+    1: {"ok": True, "conflicts": real_conflicts(entries[1]),
         "rows": [{"kyl": 0, "queue": ""}]},
     2: {"ok": True, "rows": [{"kyl": -1}]},
 }
+print(f"  样例数据：高技术战争 5-6(单周) 的冲突 = {win.results[1]['conflicts']}")
+print(f"           乒乓球 4-1(全周) 的冲突 = {real_conflicts(entries[0])}")
 win.goto(2)
-win.page_courses.set_selected_snapshot([object()] * 7)
+win.page_courses.set_selected_snapshot(SELECTED)
 win.page_courses.set_entries(entries, win.results)
 win.page_courses.sp_avg.setValue(60.0)
 shot("3-courses")
@@ -123,6 +160,9 @@ win.page_monitor.update_status({
     "state": "success", "message": "已抢到 三年级男生乒乓球 10721071-2 4-1(全周)",
     "polls": 1284, "next_poll_in": 0, "success": ["三年级男生乒乓球"],
     "courses": [{"label": "三年级男生乒乓球 10721071-2 4-1(全周)", "kyl": 0}]})
+# 「已运行」由每秒一次的计时器刷新，而这里是瞬间渲染 —— 补一个模拟时长，
+# 否则截图里会出现「已完成 / 已运行 —」这种看着别扭的组合。
+win.page_monitor.st_run.set("00:41:06")
 shot("5-monitor")
 
 # ---- 再验一遍小窗口下的排版 ----
