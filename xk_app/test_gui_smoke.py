@@ -408,6 +408,19 @@ assert _rows[2].startswith("抢　三年级男生乒乓球") and "课余量 0" i
     f"第 2 条没拿到课余量：{_rows[2]}"
 assert not any(x.startswith("退　三年级男生乒乓球") for x in _rows), "凭空出现了「退　乒乓」"
 assert sum(1 for x in _rows if "10721071" in x) == 1, "同一门课出现了两次"
+
+# 同一份状态重复推送必须是幂等的 —— 卡片是「清单 + 状态」的渲染结果，
+# 不是逐条打补丁，所以推多少次结果都应该一模一样、行数不会增长。
+_before = _row_texts()
+for _ in range(3):
+    win.page_monitor.update_status({
+        "state": "monitoring", "message": "监听中", "polls": 1, "next_poll_in": 30.0,
+        "courses": [_status_row("10721071", "2", "三年级男生乒乓球", "4-1(全周)", 0)],
+        "success": []})
+    app.processEvents()
+assert _row_texts() == _before, "重复推送同一份状态改变了卡片内容"
+assert len(_before) == 3, "重复推送让行数增长了"
+print("  重复推送是幂等的                  PASS")
 print("  要退的课不会被串行成抢的课      PASS")
 
 print()

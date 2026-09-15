@@ -1168,29 +1168,64 @@ class MonitorPage(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._last_status = {}
+        # 目标课程卡片的两个输入：清单 + 最近一次轮询结果。
+        # 卡片永远是这两者的渲染结果，见 _render_courses。
+        self._entries = []
+        self._render_courses()
 
     def reset(self, entries):
         self.log.clear()
         self._t0 = datetime.now()
         self._next_at = None
-        self._rows = {}
+        self._entries = list(entries)
+        self._last_status = {}          # 新的一轮，旧的课余量作废
         # 先落到 00:00:00。计时器一秒才走第一格，不初始化的话
         # 刚点开始的那一秒里「已运行」是一根横杠，看着像没跑起来。
         self.st_run.set("00:00:00", animate=False)
         self.st_next.set("—", animate=False)
         self.set_state("preparing", "准备中", "正在启动浏览器并登录…")
+        self._render_courses()
+
+    def _render_courses(self):
+        """按「清单 + 最近一次轮询结果」**全量重建**目标课程卡片。
+
+        这里刻意不做增量更新。增量更新得自己维护「哪一行对应清单里的哪一条」，
+        一旦对不上就会把两门课的信息拼在一起 —— 实测出现过界面凭空长出
+        「退　三年级男生乒乓球」（其实那一条是「退冰球」，文字被换成了乒乓的）。
+
+        全量重建就没有这个问题：`entries` 是唯一的事实来源，
+        卡片永远是它的一个渲染结果。几条 QLabel 而已，重建的开销可以忽略。
+        """
         # keep_head=1：卡片标题在最前面，要留下的是它（不是最后一条课程）
         clear_layout(self.card_courses.body, keep_head=1)
-        self.course_labels = []
-        for e in entries:
+
+        # 调度器只轮询「要抢的课」，所以按课程号 / 课序号把结果对回去；
+        # 「要退的课」不会被轮询，保持清单原文。
+        got = {}
+        for r in (self._last_status.get("courses") or []):
+            got.setdefault(f"{r.get('kch', '')}|{r.get('kxh', '')}", r)
+
+        for e in self._entries:
             prefix = "退　" if e.action == "drop" else "抢　"
-            lb = QLabel(prefix + e.label())
+            r = got.get(f"{e.kch or ''}|{e.kxh or ''}") if e.action != "drop" else None
+            lb = QLabel(self._course_line(prefix, e, r))
             lb.setWordWrap(True)
-            lb.setProperty("prefix", prefix)
-            # 供 update_status 把调度器报回来的行对回这一条（见那里的说明）
-            lb.setProperty("course_key", f"{e.kch or ''}|{e.kxh or ''}")
+            if r is not None:
+                kyl = r.get("kyl", -1)
+                if kyl is not None and kyl > 0:
+                    lb.setStyleSheet(f"color:{C['primary']};font-weight:700;")
             self.card_courses.body.addWidget(lb)
-            self.course_labels.append(lb)
+
+    @staticmethod
+    def _course_line(prefix: str, e, r) -> str:
+        """一行目标课程的文字：清单里的原文，有轮询结果就补上课余量。"""
+        if r is None:
+            return prefix + e.label()
+        kyl = r.get("kyl", -1)
+        if kyl is None or kyl < 0:
+            return f"{prefix}{e.label()}　　（没查到）"
+        mark = "有余量" if kyl > 0 else "暂无余量"
+        return f"{prefix}{e.label()}　　课余量 {kyl}　{mark}"
 
     def append_log(self, text, level="INFO"):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -1269,29 +1304,5 @@ class MonitorPage(QWidget):
         self._tick()
         got = s.get("success") or []
         self.st_got.set(len(got))
-        rows = s.get("courses") or []
-        # ⚠ rows 里只有**「要抢的课」**（调度器只轮询这些），
-        # 而 course_labels 是**清单里的全部条目**（含「要退的课」）。
-        # 按下标硬配会串行：清单是 [退冰球, 抢乒乓] 时，
-        # 第一条「退冰球」的文字会被换成「乒乓」的名字，于是界面上出现
-        # 「退　三年级男生乒乓球」这种根本不存在的条目 —— 看起来就是同一门课又退又抢。
-        # 所以按课程号 / 课序号把行对回标签。
-        by_key = {}
-        for r in rows:
-            k = f"{r.get('kch', '')}|{r.get('kxh', '')}"
-            by_key.setdefault(k, r)
-        for lb in getattr(self, "course_labels", []):
-            r = by_key.get(lb.property("course_key") or "")
-            if r is None:
-                continue        # 要退的课不轮询，保持 reset 时的原文
-            kyl = r.get("kyl", -1)
-            txt = lb.property("prefix") or ""
-            txt += r.get("label", "")
-            if kyl is None or kyl < 0:
-                lb.setText(f"{txt}　　（没查到）")
-            else:
-                mark = "有余量" if kyl > 0 else "暂无余量"
-                lb.setText(f"{txt}　　课余量 {kyl}　{mark}")
-                lb.setStyleSheet(
-                    f"color:{C['primary'] if kyl > 0 else C['text_dim']};"
-                    f"font-weight:{700 if kyl > 0 else 400};")
+        # 目标课程卡片由「清单 + 这份状态」整体重画，不做增量更新
+        self._render_courses()
