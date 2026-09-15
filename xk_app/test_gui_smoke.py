@@ -349,5 +349,66 @@ assert len(_asked) >= 1, "开始运行时应当弹警告"
 assert win.stack.currentIndex() == 2, "应当退回预定课程页，而不是开始监控"
 print("  带着矛盾开跑会被拦住              PASS")
 
+# ---------------------------------------------------------------------------
+# 轮询结果必须按课程号对回标签，不能按下标硬配
+#
+# 用户报过：目标课程卡片上出现
+#     退　三年级男生乒乓球 10721071-2 4-1(全周)　课余量 0
+#     抢　三年级男生乒乓球 (10721071-2) 4-1(全周)
+# 而他从没把乒乓球加进「要退」—— 只停了一次再开。
+#
+# 根因：调度器只轮询「要抢的课」，回给界面的 rows 只含这一类；
+# 而 course_labels 是**全部条目**。清单是 [退冰球, 抢乒乓] 时按下标配，
+# 第 0 条「退冰球」的文字被换成第 0 行「乒乓」的内容 —— 凭空长出一个
+# 「退乒乓」，同一门课看起来又退又抢。
+# ---------------------------------------------------------------------------
+print()
+print("=" * 60)
+print("监控页：要退的课排在前面时，轮询结果不能串行")
+print("=" * 60)
+
+
+def _row_texts():
+    out = []
+    for _i in range(win.page_monitor.card_courses.body.count()):
+        _w = win.page_monitor.card_courses.body.itemAt(_i).widget()
+        if isinstance(_w, QLabel):
+            out.append(_w.text())
+    return out
+
+
+def _status_row(kch, kxh, name, time_text, kyl):
+    return {"label": f"{name} {kch}-{kxh} {time_text}",
+            "kch": kch, "kxh": kxh, "kyl": kyl, "state": ""}
+
+
+_drop_b = CourseEntry(action="drop", kind="ty", kch="10726031", kxh="2",
+                      name="三年级男生冰球", resolved=True,
+                      resolved_name="三年级男生冰球", resolved_time="3-4(全周)",
+                      resolved_cid="2026-2027-1;10726031;2;")
+_grab_p = CourseEntry(action="grab", kind="ty", kch="10721071", kxh="2",
+                      name="三年级男生乒乓球", resolved=True,
+                      resolved_name="三年级男生乒乓球", resolved_time="4-1(全周)",
+                      resolved_cid="2026-2027-1;10721071;2;")
+
+# 「要退」排在「要抢」前面 —— 正是会串行的顺序
+win.page_monitor.reset([_drop_b, _grab_p])
+app.processEvents()
+win.page_monitor.update_status({
+    "state": "monitoring", "message": "监听中", "polls": 1, "next_poll_in": 30.0,
+    "courses": [_status_row("10721071", "2", "三年级男生乒乓球", "4-1(全周)", 0)],
+    "success": []})
+app.processEvents()
+_rows = _row_texts()
+for _r in _rows:
+    print(f"     {_r}")
+assert len(_rows) == 3, f"应当只有 标题 + 2 门：{len(_rows)}"
+assert _rows[1].startswith("退　三年级男生冰球"), f"第 1 条被串行了：{_rows[1]}"
+assert _rows[2].startswith("抢　三年级男生乒乓球") and "课余量 0" in _rows[2], \
+    f"第 2 条没拿到课余量：{_rows[2]}"
+assert not any(x.startswith("退　三年级男生乒乓球") for x in _rows), "凭空出现了「退　乒乓」"
+assert sum(1 for x in _rows if "10721071" in x) == 1, "同一门课出现了两次"
+print("  要退的课不会被串行成抢的课      PASS")
+
 print()
 print("OK")

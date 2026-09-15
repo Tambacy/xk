@@ -468,12 +468,17 @@ class Scheduler:
                 continue
 
             if row is None:
-                snapshot.append({"label": entry.label(), "kyl": -1, "state": "没查到"})
+                snapshot.append({"label": entry.label(),
+                                 "kch": entry.kch, "kxh": entry.kxh,
+                                 "kyl": -1, "state": "没查到"})
                 done_flags.append(False)
                 continue
 
             kyl = row.kyl
+            # 带上课程号/课序号：界面要拿它把这一行对回清单里的那一条。
+            # 只给 label 的话界面只能按下标配，而有「要退的课」时下标是对不上的。
             snapshot.append({"label": f"{row.name} {row.kch}-{row.kxh} {row.time_text}",
+                             "kch": row.kch, "kxh": row.kxh,
                              "kyl": kyl, "state": ""})
             # DEBUG 级别：界面日志窗能看到轮询在动，但不会撑大业务日志文件
             self.say(f"第 {self.status.polls} 次  {row.name} {row.kch}-{row.kxh} "

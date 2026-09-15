@@ -1187,6 +1187,8 @@ class MonitorPage(QWidget):
             lb = QLabel(prefix + e.label())
             lb.setWordWrap(True)
             lb.setProperty("prefix", prefix)
+            # 供 update_status 把调度器报回来的行对回这一条（见那里的说明）
+            lb.setProperty("course_key", f"{e.kch or ''}|{e.kxh or ''}")
             self.card_courses.body.addWidget(lb)
             self.course_labels.append(lb)
 
@@ -1268,17 +1270,28 @@ class MonitorPage(QWidget):
         got = s.get("success") or []
         self.st_got.set(len(got))
         rows = s.get("courses") or []
-        for i, lb in enumerate(getattr(self, "course_labels", [])):
-            if i < len(rows):
-                r = rows[i]
-                kyl = r.get("kyl", -1)
-                txt = lb.property("prefix") or ""
-                txt += r.get("label", "")
-                if kyl is None or kyl < 0:
-                    lb.setText(f"{txt}　　（没查到）")
-                else:
-                    mark = "有余量" if kyl > 0 else "暂无余量"
-                    lb.setText(f"{txt}　　课余量 {kyl}　{mark}")
-                    lb.setStyleSheet(
-                        f"color:{C['primary'] if kyl > 0 else C['text_dim']};"
-                        f"font-weight:{700 if kyl > 0 else 400};")
+        # ⚠ rows 里只有**「要抢的课」**（调度器只轮询这些），
+        # 而 course_labels 是**清单里的全部条目**（含「要退的课」）。
+        # 按下标硬配会串行：清单是 [退冰球, 抢乒乓] 时，
+        # 第一条「退冰球」的文字会被换成「乒乓」的名字，于是界面上出现
+        # 「退　三年级男生乒乓球」这种根本不存在的条目 —— 看起来就是同一门课又退又抢。
+        # 所以按课程号 / 课序号把行对回标签。
+        by_key = {}
+        for r in rows:
+            k = f"{r.get('kch', '')}|{r.get('kxh', '')}"
+            by_key.setdefault(k, r)
+        for lb in getattr(self, "course_labels", []):
+            r = by_key.get(lb.property("course_key") or "")
+            if r is None:
+                continue        # 要退的课不轮询，保持 reset 时的原文
+            kyl = r.get("kyl", -1)
+            txt = lb.property("prefix") or ""
+            txt += r.get("label", "")
+            if kyl is None or kyl < 0:
+                lb.setText(f"{txt}　　（没查到）")
+            else:
+                mark = "有余量" if kyl > 0 else "暂无余量"
+                lb.setText(f"{txt}　　课余量 {kyl}　{mark}")
+                lb.setStyleSheet(
+                    f"color:{C['primary'] if kyl > 0 else C['text_dim']};"
+                    f"font-weight:{700 if kyl > 0 else 400};")
