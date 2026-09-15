@@ -96,8 +96,8 @@ class LoginPage(QWidget):
 
         top = QHBoxLayout()
         top.setSpacing(12)
-        top.addWidget(LogoMark(34, "清", dark=True))
-        bm = QLabel("学校选课助手")
+        top.addWidget(LogoMark(34, "选", dark=True))
+        bm = QLabel("选课助手")
         bm.setStyleSheet("font-size:15px;font-weight:700;"
                          "color:rgba(255,255,255,0.95);")
         top.addWidget(bm)
@@ -109,7 +109,7 @@ class LoginPage(QWidget):
         bl.addWidget(eyebrow(f"XK HELPER · v{APP_VERSION}", dark=True))
         bl.addSpacing(18)
 
-        btitle = QLabel("学校选课助手")
+        btitle = QLabel("选课助手")
         btitle.setObjectName("BrandTitle")
         btitle.setWordWrap(True)
         bl.addWidget(btitle)

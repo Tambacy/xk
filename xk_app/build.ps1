@@ -1,5 +1,5 @@
 ﻿<#
-    学校选课助手 —— 一键构建
+    选课助手 —— 一键构建
     =========================
     用法（在项目目录下）：
         powershell -ExecutionPolicy Bypass -File build.ps1

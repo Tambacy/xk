@@ -26,7 +26,7 @@ from typing import Iterable, Sequence
 
 from .browser import CapacityRow, COURSE_KINDS, KIND_BY_NAME, ScholarBrowser, PageError
 
-# 每周节次：学校一节课的位置用 "星期-节次" 表示，如 4-1 = 星期四第 1 大节
+# 每周节次：一节课的位置用 "星期-节次" 表示，如 4-1 = 星期四第 1 大节
 SLOT_RE = re.compile(r"(\d)\s*-\s*(\d)")
 WEEK_TAG_RE = re.compile(r"[（(]([^）)]*)[）)]")
 

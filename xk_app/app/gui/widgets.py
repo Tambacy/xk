@@ -246,7 +246,7 @@ class BrandPanel(SkySurface):
 class LogoMark(QWidget):
     """圆形品牌标：浅色圆 + 深绿字。深色底上够跳，浅色底上也站得住。"""
 
-    def __init__(self, size: int = 32, text: str = "清", dark: bool = True,
+    def __init__(self, size: int = 32, text: str = "选", dark: bool = True,
                  parent=None):
         super().__init__(parent)
         self._size = size

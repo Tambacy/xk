@@ -1,5 +1,5 @@
 ; ============================================================================
-;  学校选课助手 —— Inno Setup 安装包脚本
+;  选课助手 —— Inno Setup 安装包脚本
 ; ============================================================================
 ;  自包含：Python 运行时 + PySide6 + Playwright 驱动 + 整个 Chromium 都在包里，
 ;  装完即可用，不需要联网下载任何东西。
@@ -9,9 +9,9 @@
 ;  或直接跑 build.ps1
 ; ============================================================================
 
-#define AppName        "学校选课助手"
-#define AppNameEn      "THU XkHelper"
-#define AppVersion     "0.3.10"
+#define AppName        "选课助手"
+#define AppNameEn      "XkHelper"
+#define AppVersion     "0.4.0"
 #define AppPublisher   "个人自用"
 #define AppExeName     "XkHelper.exe"
 
@@ -58,6 +58,14 @@ Name: "chinese"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务："
+
+[Files]
+; ---- 升级时清掉旧版本的可执行文件 ----
+; 程序改过名字（XkHelper.exe -> XkHelper.exe）。AppId 没变，所以 Inno 会把它
+; 当成同一次升级、装回原来的目录 —— 但旧 exe 会留在那里成为孤儿。
+; 桌面/开始菜单的快捷方式指向新名字，功能上没问题，只是留个没用的文件不好看。
+[InstallDelete]
+Type: files; Name: "{app}\XkHelper.exe"
 
 [Files]
 ; ---- 程序本体 ----

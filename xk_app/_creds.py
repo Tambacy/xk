@@ -72,6 +72,8 @@ def _candidate_roots() -> list[Path]:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if base:
         out.append(Path(base) / APP_DIR_NAME)
+        # 改名前的目录也找一下，老用户升级上来时凭据还在那儿
+        out.append(Path(base) / "XkHelper")
     out.append(Path.home() / ".local" / "share" / APP_DIR_NAME)
     # 去重且保持顺序
     seen, uniq = set(), []

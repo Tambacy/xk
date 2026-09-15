@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.band = HeroBand()
         nr = self.band.nav_row
 
-        nr.addWidget(LogoMark(30, "清", dark=True))
+        nr.addWidget(LogoMark(30, "选", dark=True))
 
         logo = QLabel(APP_DISPLAY_NAME)
         logo.setObjectName("Wordmark")

@@ -59,11 +59,11 @@ _ver_file.write_text(
     "                  OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),\n"
     "  kids=[StringFileInfo([StringTable('080404B0', [\n"
     "      StringStruct('CompanyName', '个人自用'),\n"
-    "      StringStruct('FileDescription', '学校选课助手'),\n"
+    "      StringStruct('FileDescription', '选课助手'),\n"
     f"      StringStruct('FileVersion', '{APP_VER}'),\n"
     "      StringStruct('InternalName', 'XkHelper'),\n"
     "      StringStruct('OriginalFilename', 'XkHelper.exe'),\n"
-    "      StringStruct('ProductName', '学校选课助手'),\n"
+    "      StringStruct('ProductName', '选课助手'),\n"
     f"      StringStruct('ProductVersion', '{APP_VER}')])]),\n"
     "    VarFileInfo([VarStruct('Translation', [2052, 1200])])]\n"
     ")\n", encoding="utf-8")

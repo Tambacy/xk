@@ -208,7 +208,7 @@ def export_diagnostics(zip_path: str | Path, log_dir: str | Path,
             env.append(extra_text)
         z.writestr("environment.txt", redactor.scrub("\n".join(env)))
         z.writestr("README.txt",
-                   "这是学校选课助手导出的诊断包。\n"
+                   "这是选课助手导出的诊断包。\n"
                    "内含运行日志与环境信息，已自动脱敏，不含账号密码。\n")
     return str(zip_path)
 

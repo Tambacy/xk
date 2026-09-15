@@ -31,8 +31,29 @@ from typing import Any
 
 
 APP_DIR_NAME = "XkHelper"
-APP_DISPLAY_NAME = "学校选课助手"
-APP_VERSION = "0.3.10"
+OLD_APP_DIR_NAME = "XkHelper"      # 改名前的目录，只用于一次性迁移
+APP_DISPLAY_NAME = "选课助手"
+APP_VERSION = "0.4.0"
+
+
+def migrate_legacy_root(base: Path) -> None:
+    """把旧名字的数据目录搬到新名字下。
+
+    目录里有**加密凭据**和**浏览器 profile** ——「信任此设备」的状态就存在
+    profile 里。改名后如果直接用新目录，等于换了一台电脑：要重新登录、
+    重新登记信任设备。所以第一次运行时先搬一次。
+
+    搬不动就继续用旧的（返回 False），**绝不因为改名丢用户数据**。
+    """
+    new = base / APP_DIR_NAME
+    old = base / OLD_APP_DIR_NAME
+    if new.exists() or not old.exists():
+        return True
+    try:
+        old.rename(new)
+        return True
+    except Exception:
+        return False
 
 
 def app_root() -> Path:
@@ -43,7 +64,10 @@ def app_root() -> Path:
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if not base:
         base = str(Path.home() / ".local" / "share")
-    return Path(base) / APP_DIR_NAME
+    base = Path(base)
+    if not migrate_legacy_root(base):
+        return base / OLD_APP_DIR_NAME      # 迁移失败就接着用旧的
+    return base / APP_DIR_NAME
 
 
 @dataclass

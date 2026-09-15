@@ -1,6 +1,6 @@
 # 免责声明
 
-> **一句话版本**：这是个人学习项目，与学校没有任何关系；用它选课可能违反
+> **一句话版本**：这是个人学习项目，与任何高校没有任何关系；用它选课可能违反
 > 你所在学校的规定并导致账号或选课结果受影响，**后果由使用者自行承担**。
 
 最后更新：2026-09-15 · 适用于 v0.3.0 及之后的所有版本
@@ -9,10 +9,10 @@
 
 ## 一、与任何学校均无关联
 
-- 本项目是**个人独立项目**，与学校、教务处、教学研究与培训中心、
+- 本项目是**个人独立项目**，与任何高校、学校大学教务处、教学研究与培训中心、
   信息化技术中心，以及任何院系、任何教学管理机构**均无任何关系**。
 - 本项目**未获得上述任何机构的授权、认可、支持或赞助**。
-- 名称中的「学校」二字仅用于说明适用场景，**不表示任何官方身份**。
+- 本项目是个人工具，**不代表任何机构**。
 - 统一身份认证系统、选课系统等均为学校的资产与信息系统，本项目
   **不对其做任何修改、不绕过其任何限制、不获取任何未授权的数据**。
 
@@ -84,7 +84,7 @@
 ## English Summary
 
 This is a **personal, non-commercial study project** with **no affiliation
-whatsoever** with Tsinghua University or any of its departments. It is neither
+whatsoever** with any university or any of its departments. It is neither
 authorized nor endorsed by them.
 
 Automating course registration **may violate your school's rules** and could

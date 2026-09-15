@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>学校选课助手 · 使用说明</title>
+<title>选课助手 · 使用说明</title>
 <style>
 /* ==========================================================================
    使用说明 —— 翻页式演示稿
@@ -603,10 +603,10 @@ pre code{ background: none; color: inherit; padding: 0; }
 <div class="progress"><i id="bar"></i></div>
 
 <div class="brandbar">
-  <span class="mark">清</span>
+  <span class="mark">选</span>
   <span>
-    <span class="name">学校选课助手</span>
-    <span class="ver">v0.3.10</span>
+    <span class="name">选课助手</span>
+    <span class="ver">v0.4.0</span>
   </span>
 </div>
 
@@ -626,8 +626,8 @@ pre code{ background: none; color: inherit; padding: 0; }
   <div class="bg bg-night"></div>
   <div class="inner">
     <div class="sh">
-      <p class="eyebrow stag" style="--i:0">XK HELPER · v0.3.10</p>
-      <h1 class="stag" style="--i:1">学校选课助手</h1>
+      <p class="eyebrow stag" style="--i:0">XK HELPER · v0.4.0</p>
+      <h1 class="stag" style="--i:1">选课助手</h1>
       <p class="lead stag" style="--i:2">自动盯课余量、按预定时间抢课 —— 全程用真实浏览器操作，不做任何脚本化请求</p>
     </div>
     <div class="stag" style="--i:3">
@@ -718,7 +718,7 @@ pre code{ background: none; color: inherit; padding: 0; }
       <div class="rule stag" style="--i:2"></div>
     </div>
 
-    <div class="step stag" style="--i:3"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.3.10.exe</code>，一路下一步。</div></div>
+    <div class="step stag" style="--i:3"><div class="num">1</div><div>双击 <code>XkHelper-Setup-0.4.0.exe</code>，一路下一步。</div></div>
     <div class="step stag" style="--i:4"><div class="num">2</div><div>装完会自动创建开始菜单和桌面快捷方式。</div></div>
 
     <p class="stag" style="--i:5"><small>安装目录约 650 MB —— 里面有一整个 Chromium，所以比较大。默认装在 <code>%LOCALAPPDATA%\Programs\XkHelper</code>，不需要管理员权限。</small></p>
@@ -742,7 +742,7 @@ pre code{ background: none; color: inherit; padding: 0; }
       <div class="rule stag" style="--i:2"></div>
     </div>
 
-    <p class="stag" style="--i:3">使用学校统一身份认证的学号和密码，即 info.tsinghua.edu.cn 所用的那一套。</p>
+    <p class="stag" style="--i:3">使用学校统一身份认证的学号和密码。</p>
 
     <div class="card tip stag" style="--i:4">
       <b>建议勾选「信任此浏览器」</b> —— 登录会话过期后可免密码自动重登，无需手动干预。
@@ -1029,7 +1029,7 @@ diagnostics\         导出的诊断包</pre>
     </div>
 
     <div class="step stag" style="--i:3"><div class="num">1</div><div><b>先看日志。</b>监控页右下角有「打开日志」，或直接去 <code>%LOCALAPPDATA%\XkHelper\logs\</code>。每一条都带时间戳。</div></div>
-    <div class="step stag" style="--i:4"><div class="num">2</div><div><b>跑一次自检。</b>在安装目录按住 Shift 右键 → 「在此处打开 PowerShell」，然后执行：<pre>.\XkHelper.exe --selftest</pre>它会检查浏览器能不能启动、能不能连上学校网络。结论直接写在屏幕上，同时也进日志。</div></div>
+    <div class="step stag" style="--i:4"><div class="num">2</div><div><b>跑一次自检。</b>在安装目录按住 Shift 右键 → 「在此处打开 PowerShell」，然后执行：<pre>.\XkHelper.exe --selftest</pre>它会检查浏览器能不能启动、能不能连上校园网。结论直接写在屏幕上，同时也进日志。</div></div>
     <div class="step stag" style="--i:5"><div class="num">3</div><div><b>导出诊断包。</b>监控页右上角「导出诊断包」，会打包日志 + 环境信息（已脱敏）。</div></div>
   </div>
 </section>
@@ -1144,13 +1144,13 @@ diagnostics\         导出的诊断包</pre>
   <div class="inner">
     <div class="sh">
       <p class="eyebrow stag" style="--i:0">XK HELPER</p>
-      <h1 class="stag" style="--i:1">学校选课助手 v0.3.10</h1>
+      <h1 class="stag" style="--i:1">选课助手 v0.4.0</h1>
       <p class="lead stag" style="--i:2">本说明随安装包一起分发</p>
     </div>
     <div class="card stag" style="--i:3">
       <b>免责声明</b><br>
-      本项目是<b>个人学习项目</b>，与学校及任何院系<b>没有任何关系</b>，未获授权。
-      名称中的「学校」仅用于说明适用场景。<br>
+      本项目是<b>个人学习项目</b>，与任何高校及其院系<b>没有任何关系</b>，未获授权。
+      本项目不代表任何机构。<br>
       使用自动化工具选课<b>可能违反学校规定</b>，可能导致选课结果被取消、账号受限，
       甚至纪律处分。<b>全部风险由使用者自行承担</b>，作者不承担任何责任。<br>
       请<b>确认所在学校允许</b>后再使用，并合理设置监听间隔，不要给服务器造成压力。<br>

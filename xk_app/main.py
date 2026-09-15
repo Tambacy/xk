@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-学校选课助手 —— 程序入口
+选课助手 —— 程序入口
 =========================
 
 启动顺序：先建好日志（这样崩溃也能查到），再建应用目录，最后开界面。
@@ -52,7 +52,7 @@ def selftest() -> int:
     log = get_logger("selftest")
 
     print("=" * 62)
-    print("学校选课助手 自检")
+    print("选课助手 自检")
     print("=" * 62)
     ok = True
     for k, v in describe_environment().items():
