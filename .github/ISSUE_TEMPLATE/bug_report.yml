@@ -16,8 +16,8 @@ body:
     id: version
     attributes:
       label: 程序版本
-      description: 窗口标题栏上就有，例如「选课助手 v0.4.2」
-      placeholder: 选课助手 v0.4.2
+      description: 窗口标题栏上就有，例如「选课助手 v0.4.0」
+      placeholder: 选课助手 v0.4.0
     validations:
       required: true
 

@@ -33,7 +33,7 @@ from typing import Any
 APP_DIR_NAME = "XkHelper"
 OLD_APP_DIR_NAME = "XkHelper"      # 改名前的目录，只用于一次性迁移
 APP_DISPLAY_NAME = "选课助手"
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.4.0"
 
 
 def migrate_legacy_root(base: Path) -> None:
