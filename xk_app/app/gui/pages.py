@@ -13,25 +13,64 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QSizePolicy, QGridLayout, QSpinBox, QProgressBar)
 
 from .theme import C
-from .widgets import Card, CourseCard, ModeCard, StatBox, Dot, clear_layout
+from .widgets import (BrandPanel, Card, CourseCard, GlowButton, LogoMark,
+                      ModeCard, StatBox, Dot, clear_layout, divider, eyebrow)
 from ..browser import COURSE_KINDS, HUMAN_RESEND, HUMAN_VISIBLE
-from ..config import CourseEntry
+from ..config import APP_VERSION, CourseEntry
 
 
-def _title(text, sub=""):
+def _title(text, sub="", over="", rule=True, style="PageTitle"):
+    """页面标题块：眉标 → 大标题 → 说明 → 一条发丝分割线。
+
+    层级照搬参考站：小字号淡色眉标压在大字重标题之上
+    （"Nube 02" / "Gravity is in the air"），标题下压一条极淡的横线，
+    把「页头」和「内容」分成两段 —— 整屏才有节奏，而不是一摞等距方块。
+    """
     w = QWidget()
     lay = QVBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(4)
+    lay.setSpacing(0)
+    if over:
+        lay.addWidget(eyebrow(over))
+        lay.addSpacing(9)
     t = QLabel(text)
-    t.setObjectName("PageTitle")
+    t.setObjectName(style)
     lay.addWidget(t)
     if sub:
+        lay.addSpacing(7)
         s = QLabel(sub)
         s.setObjectName("PageSub")
         s.setWordWrap(True)
         lay.addWidget(s)
+    if rule:
+        lay.addSpacing(18)
+        lay.addWidget(divider())
     return w
+
+
+def _flab(text):
+    """表单字段标签。"""
+    lb = QLabel(text)
+    lb.setObjectName("FieldLabel")
+    return lb
+
+
+def _dot_line(text: str, *, color: str = "rgba(255,255,255,0.55)",
+              obj: str = "BrandMeta", indent: int = 0) -> QHBoxLayout:
+    """深色面板上的一条「圆点 + 说明」。"""
+    row = QHBoxLayout()
+    row.setSpacing(12)
+    row.setContentsMargins(indent, 0, 0, 0)
+    d = QLabel()
+    d.setFixedSize(5, 5)
+    d.setStyleSheet(f"background:{color};border-radius:2px;")
+    row.addWidget(d, 0, Qt.AlignTop)
+    lb = QLabel(text)
+    lb.setObjectName(obj)
+    lb.setWordWrap(True)
+    row.addWidget(lb, 1)
+    return row
+
 
 
 # ==========================================================================
@@ -42,30 +81,96 @@ class LoginPage(QWidget):
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
+        # 分栏：左边深色品牌面板（整屏高），右边表单。
+        # 参考站的首屏就是「满幅深色 + 浮在上面的内容」，这一页照这个关系做，
+        # 不再是一个白卡片孤零零地飘在米色底上。
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ---------------- 左：品牌面板 ----------------
+        brand = BrandPanel()
+        bl = QVBoxLayout(brand)
+        bl.setContentsMargins(46, 38, 42, 34)
+        bl.setSpacing(0)
+
+        top = QHBoxLayout()
+        top.setSpacing(12)
+        top.addWidget(LogoMark(34, "清", dark=True))
+        bm = QLabel("学校选课助手")
+        bm.setStyleSheet("font-size:15px;font-weight:700;"
+                         "color:rgba(255,255,255,0.95);")
+        top.addWidget(bm)
+        top.addStretch(1)
+        bl.addLayout(top)
+
+        bl.addStretch(3)
+
+        bl.addWidget(eyebrow(f"XK HELPER · v{APP_VERSION}", dark=True))
+        bl.addSpacing(18)
+
+        btitle = QLabel("学校选课助手")
+        btitle.setObjectName("BrandTitle")
+        btitle.setWordWrap(True)
+        bl.addWidget(btitle)
+        bl.addSpacing(16)
+
+        bsub = QLabel("自动盯课余量、按预定时间抢课 ——\n"
+                      "全程用真实浏览器操作，不做任何脚本化请求")
+        bsub.setObjectName("BrandSub")
+        bsub.setWordWrap(True)
+        bl.addWidget(bsub)
+
+        bl.addSpacing(32)
+        bl.addWidget(divider(dark=True))
+        bl.addSpacing(24)
+        for t in ("内置完整 Chromium，所有动作都是真实鼠标键盘事件",
+                  "轮询间隔随机浮动，带长尾停顿与夜间静默",
+                  "账号密码用 Windows DPAPI 加密，明文不落盘"):
+            bl.addLayout(_dot_line(t))
+            bl.addSpacing(14)
+
+        bl.addStretch(4)
+
+        foot = QHBoxLayout()
+        foot.setSpacing(10)
+        self.btn_help = QPushButton("使用说明")
+        self.btn_help.setObjectName("OnDark")
+        self.btn_help.setCursor(Qt.PointingHandCursor)
+        foot.addWidget(self.btn_help)
+        foot.addStretch(1)
+        self.lb_user_brand = QLabel("")
+        self.lb_user_brand.setObjectName("BrandMeta")
+        foot.addWidget(self.lb_user_brand)
+        bl.addLayout(foot)
+
+        outer.addWidget(brand, 4)
+
+        # ---------------- 右：表单 ----------------
         # 卡片里除了表单还有登录进度和「需要你本人操作」提示块，内容高度会变。
         # 直接放在页面布局里的话，窗口一矮 Qt 就会把这些标签压扁成一条线
         # （字叠在一起）。所以套一层滚动区：放不下就滚动，绝不变形。
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-
         inner = QWidget()
         lay = QVBoxLayout(inner)
-        lay.setContentsMargins(48, 36, 48, 36)
+        lay.setContentsMargins(44, 44, 44, 44)
         lay.addStretch(1)
 
         row = QHBoxLayout()
         row.addStretch(1)
         card = Card()
-        card.setFixedWidth(460)
-        card.body.addWidget(_title("登录", "使用学校统一身份认证账号"))
+        card.setFixedWidth(472)
+        card.body.setContentsMargins(34, 32, 34, 30)
+        card.body.setSpacing(14)
+        card.body.addWidget(_title("登录", "使用学校统一身份认证账号",
+                                   "统一身份认证", rule=False, style="FormTitle"))
 
-        card.body.addSpacing(6)
+        card.body.addSpacing(12)
         card.body.addWidget(self._lab("学号"))
         self.ed_user = QLineEdit()
         self.ed_user.setPlaceholderText("学号 / 工作证号")
         card.body.addWidget(self.ed_user)
 
-        card.body.addSpacing(8)
+        card.body.addSpacing(6)
         card.body.addWidget(self._lab("密码"))
         self.ed_pwd = QLineEdit()
         self.ed_pwd.setEchoMode(QLineEdit.Password)
@@ -73,6 +178,7 @@ class LoginPage(QWidget):
         self.ed_pwd.returnPressed.connect(self._emit)
         card.body.addWidget(self.ed_pwd)
 
+        card.body.addSpacing(4)
         self.cb_remember = QCheckBox("记住密码（用 Windows 加密保存在本机，仅当前账户可解）")
         self.cb_remember.setChecked(True)
         card.body.addWidget(self.cb_remember)
@@ -86,12 +192,12 @@ class LoginPage(QWidget):
             "（180 天内免验证码）是登录时单独问你的，那一步在登录页上。")
         card.body.addWidget(self.cb_trust)
 
-        card.body.addSpacing(10)
-        self.btn = QPushButton("登 录")
-        self.btn.setObjectName("Primary")
-        self.btn.setMinimumHeight(42)
+        card.body.addSpacing(12)
+        self.btn = GlowButton("登 录")
+        self.btn.setMinimumHeight(44)
         self.btn.clicked.connect(self._emit)
         card.body.addWidget(self.btn)
+
 
         self.lb_status = QLabel("")
         self.lb_status.setWordWrap(True)
@@ -100,17 +206,18 @@ class LoginPage(QWidget):
 
         # 登录进度：登录常要几十秒，必须让用户看得到它在动
         self.progress_box = QFrame()
-        self.progress_box.setObjectName("CardFlat")
+        self.progress_box.setObjectName("Inset")
         self.progress_box.setVisible(False)
         pb = QVBoxLayout(self.progress_box)
-        pb.setContentsMargins(12, 10, 12, 10)
-        pb.setSpacing(5)
+        pb.setContentsMargins(16, 14, 16, 14)
+        pb.setSpacing(8)
         prow = QHBoxLayout()
         self.lb_prog_step = QLabel("")
         self.lb_prog_step.setWordWrap(True)
         prow.addWidget(self.lb_prog_step, 1)
         self.lb_prog_time = QLabel("0s")
-        self.lb_prog_time.setStyleSheet(f"color:{C['primary']};font-weight:600;")
+        self.lb_prog_time.setStyleSheet(
+            f"color:{C['primary']};font-weight:700;font-size:14px;")
         prow.addWidget(self.lb_prog_time)
         pb.addLayout(prow)
         self.bar = QProgressBar()
@@ -132,12 +239,13 @@ class LoginPage(QWidget):
         self.human_box.setObjectName("HumanBox")
         self.human_box.setVisible(False)
         hb = QVBoxLayout(self.human_box)
-        hb.setContentsMargins(12, 10, 12, 10)
-        hb.setSpacing(6)
-        self.lb_human_title = QLabel("👤 需要你本人验证")
+        hb.setContentsMargins(16, 14, 16, 14)
+        hb.setSpacing(9)
+        self.lb_human_title = QLabel("需要你本人验证")
         self.lb_human_title.setStyleSheet(
-            f"color:{C['warn']};font-weight:700;font-size:13.5px;")
+            f"color:{C['warn']};font-weight:700;font-size:14px;")
         hb.addWidget(self.lb_human_title)
+
         self.lb_human = QLabel("")
         self.lb_human.setWordWrap(True)
         hb.addWidget(self.lb_human)
@@ -186,7 +294,9 @@ class LoginPage(QWidget):
 
         card.body.addWidget(self.human_box)
 
-        card.body.addSpacing(2)
+        card.body.addSpacing(6)
+        card.body.addWidget(divider())
+        card.body.addSpacing(6)
         tip = QLabel("账号密码只加密保存在本机（Windows DPAPI），换用户或换电脑都解不开；"
                      "卸载程序时不会删除。")
         tip.setObjectName("Faint")
@@ -194,9 +304,10 @@ class LoginPage(QWidget):
         card.body.addWidget(tip)
 
         self.btn_forget = QPushButton("清除本机已保存的账号密码")
-        self.btn_forget.setObjectName("Ghost")
+        self.btn_forget.setObjectName("Link")
         self.btn_forget.setCursor(Qt.PointingHandCursor)
         card.body.addWidget(self.btn_forget)
+
 
         row.addWidget(card)
         row.addStretch(1)
@@ -208,12 +319,12 @@ class LoginPage(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(inner)
-        outer.addWidget(scroll)
+        outer.addWidget(scroll, 6)
 
     @staticmethod
     def _lab(t):
         lb = QLabel(t)
-        lb.setStyleSheet("font-weight:600;")
+        lb.setObjectName("FieldLabel")
         return lb
 
     def set_config(self, cfg):
@@ -358,9 +469,11 @@ class ModePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(48, 32, 48, 32)
-        outer.setSpacing(14)
-        outer.addWidget(_title("选择运行模式", "根据你现在处在选课的哪个阶段来选"))
+        outer.setContentsMargins(52, 28, 52, 30)
+        outer.setSpacing(30)
+        outer.addWidget(_title("选择运行模式", "根据你现在处在选课的哪个阶段来选",
+                               "步骤 2 / 5"))
+
 
         self.cards = []
         specs = [
@@ -384,7 +497,7 @@ class ModePage(QWidget):
               "发现余量立刻抢，需要让位就先退课"]),
         ]
         grid = QHBoxLayout()
-        grid.setSpacing(16)
+        grid.setSpacing(22)
         for idx, title, badge, desc, bullets in specs:
             c = ModeCard(idx, title, badge, desc, bullets)
             c.clicked.connect(self.chosen.emit)
@@ -395,7 +508,6 @@ class ModePage(QWidget):
 
         bar = QHBoxLayout()
         b = QPushButton("← 返回")
-        b.setObjectName("Ghost")
         b.clicked.connect(self.back.emit)
         bar.addWidget(b)
         bar.addStretch(1)
@@ -422,73 +534,76 @@ class CoursesPage(QWidget):
         self.results: dict[int, dict] = {}
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(40, 28, 40, 28)
-        root.setSpacing(18)
+        root.setContentsMargins(40, 26, 40, 24)
+        root.setSpacing(26)
 
         # ---------- 左：录入 ----------
         # 窗口不高时这里会放不下（会被 Qt 压扁），所以套一层滚动区
         left_inner = QWidget()
         left = QVBoxLayout(left_inner)
-        left.setContentsMargins(0, 0, 12, 0)
-        left.setSpacing(12)
-        left.addWidget(_title("预定课程", "信息不用填全，能唯一定位到一门课就行"))
+        left.setContentsMargins(0, 0, 14, 0)
+        left.setSpacing(20)
+        left.addWidget(_title("预定课程", "信息不用填全，能唯一定位到一门课就行",
+                              "步骤 3 / 5"))
 
         self.form_card = Card()
         f = self.form_card.body
         self.lb_action = QLabel("我要抢这门课")
+        self.lb_action.setObjectName("SectionTitle")
         f.addWidget(self.lb_action)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(8)
-        grid.setColumnMinimumWidth(0, 76)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(12)
+        grid.setColumnMinimumWidth(0, 84)
         grid.setColumnStretch(1, 1)          # 输入框占满剩余宽度
         self.cb_action = QComboBox()
         self.cb_action.addItems(["要抢的课", "要退的课"])
         self.cb_action.currentIndexChanged.connect(self._on_action_changed)
-        grid.addWidget(QLabel("用途"), 0, 0)
+        grid.addWidget(_flab("用途"), 0, 0)
         grid.addWidget(self.cb_action, 0, 1)
 
         self.cb_kind = QComboBox()
         for k, v in COURSE_KINDS.items():
             self.cb_kind.addItem(v["name"], k)
         self.cb_kind.setCurrentIndex(list(COURSE_KINDS).index("ty"))
-        grid.addWidget(QLabel("课程种类"), 1, 0)
+        grid.addWidget(_flab("课程种类"), 1, 0)
         grid.addWidget(self.cb_kind, 1, 1)
 
         self.ed_name = QLineEdit()
         self.ed_name.setPlaceholderText("如 大学物理（可只填这一项）")
-        grid.addWidget(QLabel("课程名"), 2, 0)
+        grid.addWidget(_flab("课程名"), 2, 0)
         grid.addWidget(self.ed_name, 2, 1)
 
         self.ed_teacher = QLineEdit()
         self.ed_teacher.setPlaceholderText("选填")
-        grid.addWidget(QLabel("任课教师"), 3, 0)
+        grid.addWidget(_flab("任课教师"), 3, 0)
         grid.addWidget(self.ed_teacher, 3, 1)
 
         self.ed_time = QLineEdit()
         self.ed_time.setPlaceholderText("选填，如 4-1")
-        grid.addWidget(QLabel("上课时间"), 4, 0)
+        grid.addWidget(_flab("上课时间"), 4, 0)
         grid.addWidget(self.ed_time, 4, 1)
 
         self.ed_kch = QLineEdit()
         self.ed_kch.setPlaceholderText("选填，如 10421055")
-        grid.addWidget(QLabel("课程号"), 5, 0)
+        grid.addWidget(_flab("课程号"), 5, 0)
         grid.addWidget(self.ed_kch, 5, 1)
 
         self.ed_kxh = QLineEdit()
         self.ed_kxh.setPlaceholderText("选填，如 2")
-        grid.addWidget(QLabel("课序号"), 6, 0)
+        grid.addWidget(_flab("课序号"), 6, 0)
         grid.addWidget(self.ed_kxh, 6, 1)
         f.addLayout(grid)
 
-        f.addSpacing(4)
+        f.addSpacing(6)
         self.lb_hint = QLabel("提示：同名课程有多个课堂时，请补上课序号或上课时间。")
         self.lb_hint.setObjectName("Faint")
         self.lb_hint.setWordWrap(True)
         f.addWidget(self.lb_hint)
 
         rowb = QHBoxLayout()
+        rowb.setSpacing(12)
         b_add = QPushButton("添加到清单")
         b_add.setObjectName("Primary")
         b_add.clicked.connect(self._on_add)
@@ -499,20 +614,21 @@ class CoursesPage(QWidget):
         rowb.addStretch(1)
         f.addLayout(rowb)
 
+
         left.addWidget(self.form_card)
 
         # ---------- 运行设置 ----------
         self.set_card = Card("运行设置")
         s = self.set_card.body
         sg = QGridLayout()
-        sg.setHorizontalSpacing(10)
-        sg.setVerticalSpacing(8)
+        sg.setHorizontalSpacing(14)
+        sg.setVerticalSpacing(12)
 
         self.dt_start = QDateTimeEdit()
         self.dt_start.setDisplayFormat("yyyy-MM-dd HH:mm")
         self.dt_start.setCalendarPopup(True)
         self.dt_start.setDateTime(QDateTime.currentDateTime().addSecs(3600))
-        sg.addWidget(QLabel("开始选课时间"), 0, 0)
+        sg.addWidget(_flab("开始选课时间"), 0, 0)
         sg.addWidget(self.dt_start, 0, 1)
         self.row_start = (0,)
 
@@ -520,27 +636,30 @@ class CoursesPage(QWidget):
         self.sp_lead.setRange(0, 3600)
         self.sp_lead.setValue(60)
         self.sp_lead.setSuffix(" 秒")
-        sg.addWidget(QLabel("提前盯梢"), 1, 0)
+        sg.addWidget(_flab("提前盯梢"), 1, 0)
         sg.addWidget(self.sp_lead, 1, 1)
 
         self.sp_avg = QDoubleSpinBox()
         self.sp_avg.setRange(0.5, 3600)
         self.sp_avg.setValue(3.0)
         self.sp_avg.setSuffix(" 秒")
-        sg.addWidget(QLabel("平均监听间隔"), 2, 0)
+        sg.addWidget(_flab("平均监听间隔"), 2, 0)
         sg.addWidget(self.sp_avg, 2, 1)
 
         # 学期：登录后自动识别并填充，也可手动改（换学期、跨学期提前预定都能用）
         self.cb_xnxq = QComboBox()
         self.cb_xnxq.setToolTip("登录后自动识别当前学期；也可以手动切换")
-        sg.addWidget(QLabel("学期"), 3, 0)
+        sg.addWidget(_flab("学期"), 3, 0)
         sg.addWidget(self.cb_xnxq, 3, 1)
         self.lb_xnxql = sg.itemAtPosition(3, 0).widget()
 
         self.lb_lead = sg.itemAtPosition(1, 0).widget()
         self.lb_avgl = sg.itemAtPosition(2, 0).widget()
         self.lb_startl = sg.itemAtPosition(0, 0).widget()
+        sg.setColumnMinimumWidth(0, 100)
+        sg.setColumnStretch(1, 1)
         s.addLayout(sg)
+        s.addSpacing(4)
 
         self.cb_night = QCheckBox("夜间静默 01:00 ~ 06:00（该时段完全不发请求）")
         self.cb_night.setChecked(True)
@@ -572,7 +691,7 @@ class CoursesPage(QWidget):
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         left_scroll.setFrameShape(QFrame.NoFrame)
         left_scroll.setWidget(left_inner)
-        left_scroll.setMinimumWidth(400)
+        left_scroll.setMinimumWidth(420)
         root.addWidget(left_scroll, 5)
 
         # ---------- 右：清单 ----------
@@ -580,7 +699,7 @@ class CoursesPage(QWidget):
         right_host.setMinimumWidth(430)
         right = QVBoxLayout(right_host)
         right.setContentsMargins(0, 0, 0, 0)
-        right.setSpacing(12)
+        right.setSpacing(16)
         head = QHBoxLayout()
         t = QLabel("课程清单")
         t.setObjectName("CardTitle")
@@ -596,8 +715,8 @@ class CoursesPage(QWidget):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_host = QWidget()
         self.list_lay = QVBoxLayout(self.list_host)
-        self.list_lay.setContentsMargins(2, 2, 12, 2)   # 右边留出滚动条位置
-        self.list_lay.setSpacing(10)
+        self.list_lay.setContentsMargins(2, 2, 14, 2)   # 右边留出滚动条位置
+        self.list_lay.setSpacing(14)
         self.list_lay.addStretch(1)
         self.scroll.setWidget(self.list_host)
         right.addWidget(self.scroll, 3)
@@ -623,11 +742,11 @@ class CoursesPage(QWidget):
         self.sel_scroll.setWidgetResizable(True)
         self.sel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sel_scroll.setFrameShape(QFrame.NoFrame)
-        self.sel_scroll.setMinimumHeight(130)
+        self.sel_scroll.setMinimumHeight(140)
         sel_host = QWidget()
         self.sel_lay = QVBoxLayout(sel_host)
-        self.sel_lay.setContentsMargins(2, 2, 12, 2)
-        self.sel_lay.setSpacing(6)
+        self.sel_lay.setContentsMargins(2, 2, 14, 2)
+        self.sel_lay.setSpacing(8)
         self.sel_lay.addStretch(1)
         self.sel_scroll.setWidget(sel_host)
         right.addWidget(self.sel_scroll, 2)
@@ -638,15 +757,14 @@ class CoursesPage(QWidget):
 
         barb = QHBoxLayout()
         b_back = QPushButton("← 返回")
-        b_back.setObjectName("Ghost")
         b_back.clicked.connect(self.back.emit)
         barb.addWidget(b_back)
         barb.addStretch(1)
-        self.btn_next = QPushButton("下一步 →")
-        self.btn_next.setObjectName("Primary")
+        self.btn_next = GlowButton("下一步 →")
         self.btn_next.clicked.connect(self.next.emit)
         barb.addWidget(self.btn_next)
         right.addLayout(barb)
+
 
         root.addWidget(right_host, 6)
 
@@ -797,13 +915,13 @@ class CoursesPage(QWidget):
     def _sel_row(self, c):
         """已选课程列表里的一行：[类别] 课程号-课序号 课程名 时间 教师  [要退]"""
         f = QFrame()
-        f.setObjectName("CardFlat")
+        f.setObjectName("Inset")
         lay = QHBoxLayout(f)
-        lay.setContentsMargins(10, 7, 10, 7)
-        lay.setSpacing(8)
+        lay.setContentsMargins(16, 12, 12, 12)
+        lay.setSpacing(12)
         kind = (getattr(c, "kind", "") or "—").strip() or "—"
         bits = [f"<b>{getattr(c, 'name', '')}</b>",
-                f"<span style='color:{C['text_dim']}'>［{kind}］"
+                f"<span style='color:{C['text_faint']}'>［{kind}］"
                 f"{getattr(c, 'kch', '')}-{getattr(c, 'kxh', '')}　"
                 f"{getattr(c, 'time_text', '')}"]
         teacher = getattr(c, "teacher", "")
@@ -833,12 +951,12 @@ class ConfirmPage(QWidget):
         super().__init__(parent)
         self.cfg = cfg
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(48, 32, 48, 32)
-        outer.setSpacing(16)
-        outer.addWidget(_title("确认并启动", "点开始后请保持程序运行"))
+        outer.setContentsMargins(52, 28, 52, 30)
+        outer.setSpacing(28)
+        outer.addWidget(_title("确认并启动", "点开始后请保持程序运行", "步骤 4 / 5"))
 
         row = QHBoxLayout()
-        row.setSpacing(16)
+        row.setSpacing(24)
 
         self.card_plan = Card("将要做什么")
         row.addWidget(self.card_plan, 3)
@@ -850,16 +968,15 @@ class ConfirmPage(QWidget):
         outer.addStretch(1)
         bar = QHBoxLayout()
         b = QPushButton("← 返回修改")
-        b.setObjectName("Ghost")
         b.clicked.connect(self.back.emit)
         bar.addWidget(b)
         bar.addStretch(1)
-        self.btn = QPushButton("开始运行")
-        self.btn.setObjectName("Primary")
+        self.btn = GlowButton("开始运行")
         self.btn.setMinimumHeight(44)
         self.btn.clicked.connect(self.start.emit)
         bar.addWidget(self.btn)
         outer.addLayout(bar)
+
 
     def refresh(self, cfg, entries):
         clear_layout(self.card_plan.body, keep_tail=0)
@@ -894,9 +1011,9 @@ class ConfirmPage(QWidget):
         if cfg.night_silence:
             add(f"🌙 夜间静默：{cfg.night_silence[0]} ~ {cfg.night_silence[1]} 期间完全不发请求")
         if cfg.dry_run:
-            add('<span style="color:#D9822B"><b>当前是试运行：只监听，不会真的提交。</b></span>')
+            add(f'<span style="color:{C["warn"]}"><b>当前是试运行：只监听，不会真的提交。</b></span>')
 
-        add("<b>课程清单</b>", "margin-top:6px;")
+        add("<b>课程清单</b>", "margin-top:10px;")
         for e in entries:
             act = "退" if e.action == "drop" else "抢"
             add(f"　[{act}] {e.label()}" + (f"　{e.resolved_teacher}" if e.resolved_teacher else ""))
@@ -933,15 +1050,22 @@ class MonitorPage(QWidget):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.cfg = cfg
+        # 这一页内容最多（状态头 + 四个统计 + 目标课程 + 日志），
+        # 窗口一矮就会被压扁或截断，所以和登录页一样套一层滚动区。
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(40, 26, 40, 26)
-        outer.setSpacing(14)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(40, 26, 40, 24)
+        lay.setSpacing(18)
 
         head = QHBoxLayout()
-        self.dot = Dot(C["primary"])
+        head.setSpacing(6)
+        self.dot = Dot(C["primary"], size=11)
         head.addWidget(self.dot)
         self.lb_state = QLabel("准备中")
-        self.lb_state.setStyleSheet("font-size:20px;font-weight:600;")
+        self.lb_state.setObjectName("BigState")
         head.addWidget(self.lb_state)
         head.addStretch(1)
         self.btn_logs = QPushButton("打开日志")
@@ -954,34 +1078,46 @@ class MonitorPage(QWidget):
         self.btn_stop.setObjectName("Danger")
         self.btn_stop.clicked.connect(self.stop.emit)
         head.addWidget(self.btn_stop)
-        outer.addLayout(head)
+        lay.addLayout(head)
 
         self.lb_msg = QLabel("")
         self.lb_msg.setObjectName("Hint")
         self.lb_msg.setWordWrap(True)
-        outer.addWidget(self.lb_msg)
+        lay.addWidget(self.lb_msg)
 
         stats = QHBoxLayout()
-        stats.setSpacing(12)
-        self.st_poll = StatBox("已轮询次数")
-        self.st_next = StatBox("距下次检查")
-        self.st_run = StatBox("已运行")
-        self.st_got = StatBox("已抢到")
+        stats.setSpacing(16)
+        self.st_poll = StatBox("已轮询次数", accent=C["primary_soft"])
+        self.st_next = StatBox("距下次检查", accent=C["warn_mid"])
+        self.st_run = StatBox("已运行", accent=C["primary_mid"])
+        self.st_got = StatBox("已抢到", accent=C["primary"])
         for s in (self.st_poll, self.st_next, self.st_run, self.st_got):
             stats.addWidget(s, 1)
-        outer.addLayout(stats)
+        lay.addLayout(stats)
+        lay.addSpacing(2)
 
         self.card_courses = Card("目标课程")
-        outer.addWidget(self.card_courses)
+        self.card_courses.body.setSpacing(10)
+        lay.addWidget(self.card_courses)
 
         logc = Card("运行日志")
+        logc.body.setSpacing(10)
         self.log = QPlainTextEdit()
         self.log.setObjectName("Log")
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(3000)
-        self.log.setMinimumHeight(220)
+        self.log.setMinimumHeight(180)
         logc.body.addWidget(self.log)
-        outer.addWidget(logc, 1)
+        lay.addWidget(logc, 1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+
+
 
         self._t0 = None
         self._timer = QTimer(self)
@@ -997,19 +1133,22 @@ class MonitorPage(QWidget):
         clear_layout(self.card_courses.body, keep_tail=1)
         self.course_labels = []
         for e in entries:
-            lb = QLabel("　" + ("[退] " if e.action == "drop" else "[抢] ") + e.label())
+            prefix = "退　" if e.action == "drop" else "抢　"
+            lb = QLabel(prefix + e.label())
             lb.setWordWrap(True)
+            lb.setProperty("prefix", prefix)
             self.card_courses.body.addWidget(lb)
             self.course_labels.append(lb)
 
     def append_log(self, text, level="INFO"):
         ts = datetime.now().strftime("%H:%M:%S")
-        color = {"ERROR": "#FF8A80", "WARN": "#FFD180",
-                 "DEBUG": "#8A93A0"}.get(level, "#D6DAE1")
+        color = {"ERROR": C["danger_bright"], "WARN": "#E8C48A",
+                 "DEBUG": C["log_dim"]}.get(level, C["log_text"])
         safe = (text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
         self.log.appendHtml(
-            f'<span style="color:#6E7681">{ts}</span> '
+            f'<span style="color:{C["log_dim"]}">{ts}</span> '
             f'<span style="color:{color}">{safe}</span>')
+
 
     def _tick(self):
         if self._t0:
@@ -1048,9 +1187,13 @@ class MonitorPage(QWidget):
             if i < len(rows):
                 r = rows[i]
                 kyl = r.get("kyl", -1)
-                txt = r.get("label", "")
+                txt = lb.property("prefix") or ""
+                txt += r.get("label", "")
                 if kyl is None or kyl < 0:
-                    lb.setText(f"　{txt}　（没查到）")
+                    lb.setText(f"{txt}　　（没查到）")
                 else:
-                    mark = "✅ 有余量！" if kyl > 0 else "暂无余量"
-                    lb.setText(f"　{txt}　课余量 {kyl}　{mark}")
+                    mark = "有余量" if kyl > 0 else "暂无余量"
+                    lb.setText(f"{txt}　　课余量 {kyl}　{mark}")
+                    lb.setStyleSheet(
+                        f"color:{C['primary'] if kyl > 0 else C['text_dim']};"
+                        f"font-weight:{700 if kyl > 0 else 400};")

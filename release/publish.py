@@ -21,13 +21,13 @@ for _s in ("stdout", "stderr"):
         pass
 
 REPO = "Tambacy/xk"
-TAG = "v0.2.0"
-NAME = "v0.2.0 二次验证流程修复与抢课校验"
+TAG = "v0.3.0"
+NAME = "v0.3.0 界面改版与监控页滚动修复"
 ROOT = Path(r"E:\Test_Project")
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
-    ROOT / "release" / "XkHelper-v0.2.0-source.zip",
-    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.2.0.exe",
+    ROOT / "release" / "XkHelper-v0.3.0-source.zip",
+    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.3.0.exe",
 ]
 
 

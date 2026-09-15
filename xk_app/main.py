@@ -129,7 +129,7 @@ def main():
             pass
 
     from PySide6.QtWidgets import QApplication, QMessageBox
-    from PySide6.QtGui import QFont
+    from PySide6.QtGui import QFont, QIcon
 
     from app.config import Paths, APP_DISPLAY_NAME, APP_VERSION
     from app.logging_setup import setup_logging, install_excepthook, log_environment
@@ -155,6 +155,16 @@ def main():
 
     try:
         app.setFont(QFont("Microsoft YaHei UI", 10))
+    except Exception:
+        pass
+
+    # 窗口/任务栏图标。exe 自身内嵌了图标，但开发运行时（python main.py）
+    # 显示的是 Python 的默认图标，所以显式设一次。
+    try:
+        from app.runtime import find_asset
+        _ico = find_asset("app.ico") or find_asset("app.png")
+        if _ico:
+            app.setWindowIcon(QIcon(_ico))
     except Exception:
         pass
 

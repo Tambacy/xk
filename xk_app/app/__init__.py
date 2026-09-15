@@ -1,5 +1,5 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """学校选课助手 —— 应用包。"""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 APP_NAME = "学校选课助手"

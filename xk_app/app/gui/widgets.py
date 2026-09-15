@@ -1,13 +1,35 @@
 # -*- coding: utf-8 -*-
-"""可复用的界面组件。"""
+"""可复用的界面组件。
+
+风格规则见 theme.py。这一版重点补三样东西，缺了它们界面就只是「方块叠方块」：
+
+  · **深度** —— `apply_shadow()` 分层柔投影 + 悬停时真实抬起（带补间动画）
+  · **形体变化** —— 圆（LogoMark / 状态点）、弧（深色带的同心弧纹）、
+    色条（课程卡左侧状态条）、超大幽灵数字（模式卡）
+  · **手绘细节** —— 深色带、品牌面板、步骤导轨、统计块的图形都用 QPainter 画，
+    而不是拿一堆 QLabel 拼出来
+"""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QFont, QPainter, QColor, QPen
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QLabel, QWidget,
-                               QPushButton, QSizePolicy, QGraphicsDropShadowEffect)
+from PySide6.QtCore import (Qt, Signal, QEvent, QPointF, QRectF, QSize,
+                            QVariantAnimation, QEasingCurve)
+from PySide6.QtGui import (QColor, QFont, QLinearGradient, QPainter, QPen,
+                           QRadialGradient)
+from PySide6.QtWidgets import (QFrame, QGraphicsDropShadowEffect, QHBoxLayout,
+                               QLabel, QPushButton, QSizePolicy, QVBoxLayout,
+                               QWidget)
 
-from .theme import C, STEPS, step_chip
+from .theme import C, HERO_H, STEPS, shadow_spec
+
+
+# ==========================================================================
+# 基础工具
+# ==========================================================================
+def repolish(w: QWidget):
+    """改了动态属性之后，必须重新走一遍样式表才会生效。"""
+    w.style().unpolish(w)
+    w.style().polish(w)
+    w.update()
 
 
 def clear_layout(lay, keep_tail: int = 0):
@@ -29,15 +51,360 @@ def clear_layout(lay, keep_tail: int = 0):
                 sub.deleteLater()
 
 
-class Card(QFrame):
-    """带圆角和浅阴影的卡片容器。"""
+def eyebrow(text: str, dark: bool = False) -> QLabel:
+    """眉标：小字号、淡色、压在大标题之上（参考站的 "Nube 02"）。"""
+    lb = QLabel(text)
+    lb.setObjectName("EyebrowDark" if dark else "Eyebrow")
+    return lb
 
-    def __init__(self, title: str = "", subtitle: str = "", parent=None):
+
+def divider(dark: bool = False) -> QLabel:
+    f = QLabel()
+    f.setObjectName("RuleDark" if dark else "Rule")
+    f.setFixedHeight(1)
+    f.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    return f
+
+
+def ui_font(px: int, weight: int = QFont.Normal) -> QFont:
+    f = QFont()
+    f.setFamilies(["Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+                   "Segoe UI"])
+    f.setPixelSize(px)
+    f.setWeight(QFont.Weight(weight))
+    return f
+
+
+def apply_shadow(w: QWidget, level: str = "card") -> QGraphicsDropShadowEffect:
+    blur, dx, dy, r, g, b, a = shadow_spec(level)
+    eff = QGraphicsDropShadowEffect(w)
+    eff.setBlurRadius(blur)
+    eff.setOffset(dx, dy)
+    eff.setColor(QColor(r, g, b, a))
+    w.setGraphicsEffect(eff)
+    return eff
+
+
+class ShadowAnim:
+    """把投影在两个档位之间补间 —— 悬停「抬起」的手感就来自这里。
+
+    直接换 QGraphicsDropShadowEffect 的参数会「啪」地跳一下；
+    这里对 模糊半径 / 偏移 / 透明度 三个量同时做缓动。
+    """
+
+    def __init__(self, w: QWidget, level: str = "card"):
+        self.eff = apply_shadow(w, level)
+        self._a = shadow_spec(level)
+        self._b = shadow_spec(level)
+        self._t = 1.0
+        self.anim = QVariantAnimation(w)
+        self.anim.setDuration(230)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.valueChanged.connect(self._apply_t)
+
+    def to(self, level: str):
+        self._a = self._current()
+        self._b = shadow_spec(level)
+        self.anim.stop()
+        self.anim.setStartValue(0.0)
+        self.anim.setEndValue(1.0)
+        self.anim.start()
+
+    def _current(self):
+        o = self.eff.offset()
+        col = self.eff.color()
+        return (self.eff.blurRadius(), o.x(), o.y(),
+                col.red(), col.green(), col.blue(), col.alpha())
+
+    def _apply_t(self, t: float):
+        a, b = self._a, self._b
+        v = [a[i] + (b[i] - a[i]) * t for i in range(7)]
+        self.eff.setBlurRadius(v[0])
+        self.eff.setOffset(int(round(v[1])), int(round(v[2])))
+        self.eff.setColor(QColor(int(v[3]), int(v[4]), int(v[5]), int(v[6])))
+
+
+# ==========================================================================
+# 深色面板：顶部 Hero 带 / 登录页品牌面板共用同一套画法
+# ==========================================================================
+def paint_dark_panel(p: QPainter, w: int, h: int, *,
+                     arcs: bool = True, fade_to_bg: int = 0) -> None:
+    """画一块深墨绿渐变面板：底色渐变 + 顶部辉光 + 同心弧纹。
+
+    同心弧是参考站那种「充气结构」弧线的抽象 —— 也是整屏唯一一处
+    非矩形的装饰，用来打破方块感。
+    """
+    p.setRenderHint(QPainter.Antialiasing, True)
+
+    g = QLinearGradient(0, 0, 0, h)
+    g.setColorAt(0.00, QColor("#1B5A36"))
+    g.setColorAt(0.34, QColor("#123F24"))
+    g.setColorAt(0.70, QColor(C["primary_ink"]))
+    g.setColorAt(1.00, QColor(C["primary_deep"]))
+    p.fillRect(0, 0, w, h, g)
+
+    # 顶部偏左的柔光，让渐变的顶端「亮起来」
+    rg = QRadialGradient(QPointF(w * 0.34, -h * 0.28), max(w, h) * 0.92)
+    rg.setColorAt(0.0, QColor(255, 255, 255, 34))
+    rg.setColorAt(0.55, QColor(255, 255, 255, 9))
+    rg.setColorAt(1.0, QColor(255, 255, 255, 0))
+    p.fillRect(0, 0, w, h, rg)
+
+    if arcs:
+        p.save()
+        p.setClipRect(0, 0, w, int(h - fade_to_bg))
+        p.setBrush(Qt.NoBrush)
+        cx, cy = w * 0.5, h * 1.62
+        for i in range(10):
+            ry = h * (0.52 + i * 0.30)
+            alpha = int(26 - i * 2.1)
+            if alpha <= 2:
+                break
+            pen = QPen(QColor(255, 255, 255, alpha))
+            pen.setWidthF(1.0)
+            p.setPen(pen)
+            p.drawEllipse(QPointF(cx, cy), ry * 2.35, ry)
+        p.restore()
+
+    # 底部融进页面底色：深色带不是被生硬切断的，而是化开的。
+    # 用「页面底色逐渐盖上」的方式，而不是往深色里掺灰 —— 掺灰会在
+    # 中间调留下一道看得见的灰带。
+    if fade_to_bg > 0:
+        fg = QLinearGradient(0, h - fade_to_bg, 0, h)
+        base = QColor(C["bg"])
+        for pos, a in ((0.00, 0), (0.38, 96), (0.72, 208), (1.00, 255)):
+            c = QColor(base)
+            c.setAlpha(a)
+            fg.setColorAt(pos, c)
+        p.fillRect(0, int(h - fade_to_bg), w, fade_to_bg, fg)
+
+
+class HeroBand(QWidget):
+    """窗口顶部那条深色带：玻璃导航胶囊 + 步骤导轨都在它上面。
+
+    参考站的首屏是「满幅深色影像 + 浮在上面的玻璃导航 + 白色大字」。
+    桌面应用没有影像可放，于是用一块深墨绿渐变面板顶上 ——
+    玻璃只有浮在深色上才成立，浮在米白底上的玻璃等于看不见。
+    """
+
+    FADE = 34          # 底部化开进页面的像素高度
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("HeroBand")
+        self.setFixedHeight(HERO_H + self.FADE)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(28, 14, 28, 0)
+        v.setSpacing(12)
+
+        # 居中、贴合内容的玻璃胶囊（参考站的 nav 就是这样一条，不是通栏横条）
+        self.nav = QFrame()
+        self.nav.setObjectName("NavPill")
+        self.nav_row = QHBoxLayout(self.nav)
+        self.nav_row.setContentsMargins(7, 7, 7, 7)
+        self.nav_row.setSpacing(8)
+        v.addWidget(self.nav, 0, Qt.AlignHCenter)
+
+        self.rail = StepRail()
+        v.addWidget(self.rail)
+        v.addStretch(1)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        paint_dark_panel(p, self.width(), HERO_H, arcs=True, fade_to_bg=self.FADE)
+
+
+class BrandPanel(QWidget):
+    """登录页左侧的深色品牌面板 —— 和 HeroBand 同一套视觉语言。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("BrandPanel")
+        self.setMinimumWidth(380)
+        self.setMaximumWidth(560)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        paint_dark_panel(p, self.width(), self.height(), arcs=True)
+
+
+class LogoMark(QWidget):
+    """圆形品牌标：浅色圆 + 深绿字。深色底上够跳，浅色底上也站得住。"""
+
+    def __init__(self, size: int = 32, text: str = "清", dark: bool = True,
+                 parent=None):
+        super().__init__(parent)
+        self._size = size
+        self._text = text
+        self._dark = dark          # True = 画在深色背景上
+        self.setFixedSize(size, size)
+
+    def sizeHint(self):
+        return QSize(self._size, self._size)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0.5, 0.5, self._size - 1.0, self._size - 1.0)
+
+        if self._dark:
+            g = QLinearGradient(0, 0, 0, self._size)
+            g.setColorAt(0.0, QColor(255, 255, 255, 245))
+            g.setColorAt(1.0, QColor(226, 238, 229, 235))
+            p.setBrush(g)
+            p.setPen(QPen(QColor(255, 255, 255, 90), 1))
+            p.drawEllipse(r)
+            p.setPen(QColor(C["primary"]))
+        else:
+            g = QLinearGradient(0, 0, 0, self._size)
+            g.setColorAt(0.0, QColor(C["primary_2"]))
+            g.setColorAt(1.0, QColor(C["primary"]))
+            p.setBrush(g)
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(r)
+            p.setPen(QColor("#FFFFFF"))
+
+        p.setFont(ui_font(int(self._size * 0.44), QFont.Bold))
+        p.drawText(r, Qt.AlignCenter, self._text)
+
+
+class StepRail(QWidget):
+    """步骤导轨：编号圆点 + 连接线 + 文字，一次画完。
+
+    旧版是一排 QLabel 富文本胶囊，Qt 的富文本引擎不支持 border-radius，
+    渲染出来是直角方块；而用真控件又会得到一排互不相连的色块。
+    这里整条导轨自绘，编号圆点和连接线才连得起来。
+    """
+
+    NODE = 26
+    GAP = 10          # 圆点 → 文字
+    LINK = 30         # 文字 → 下一个圆点
+    LINK_MIN = 12
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current = 0
+        self.setFixedHeight(34)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def set_current(self, index: int):
+        self.current = index
+        self.update()
+
+    def _layout(self, fm: 'QFontMetrics'):
+        widths = [self.NODE + self.GAP + fm.horizontalAdvance(s) for s in STEPS]
+        total = sum(widths) + self.LINK * (len(STEPS) - 1)
+        link = self.LINK
+        avail = self.width()
+        if total > avail:
+            spare = total - avail
+            link = max(self.LINK_MIN, self.LINK - spare // max(1, len(STEPS) - 1))
+            total = sum(widths) + link * (len(STEPS) - 1)
+        return widths, link, total
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+
+        f_lab = ui_font(13, QFont.DemiBold)
+        p.setFont(f_lab)
+        fm = p.fontMetrics()
+        widths, link, total = self._layout(fm)
+
+        x = max(0.0, (self.width() - total) / 2.0)
+        h = self.height()
+        cy = h / 2.0
+
+        for i in range(len(STEPS)):
+            st = "active" if i == self.current else (
+                "done" if i < self.current else "todo")
+
+            # 连接线（画在当前圆点右侧，进度未到就是暗的）
+            if i < len(STEPS) - 1:
+                x0 = x + widths[i] + link / 2.0
+                x1 = x + widths[i] + link
+                done = i < self.current
+                pen = QPen(QColor(255, 255, 255, 88 if done else 30))
+                pen.setWidthF(1.4)
+                pen.setCapStyle(Qt.RoundCap)
+                p.setPen(pen)
+                p.drawLine(QPointF(x0, cy), QPointF(x1, cy))
+
+            # 圆点
+            nx = x + self.NODE / 2.0
+            r = self.NODE / 2.0
+
+            if st == "active":
+                # 外圈柔光
+                glow = QRadialGradient(QPointF(nx, cy), r * 2.5)
+                glow.setColorAt(0.0, QColor(255, 255, 255, 60))
+                glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(glow)
+                p.drawEllipse(QPointF(nx, cy), r * 2.5, r * 2.5)
+                p.setBrush(QColor(255, 255, 255, 248))
+                p.setPen(Qt.NoPen)
+            elif st == "done":
+                p.setBrush(QColor(255, 255, 255, 42))
+                p.setPen(QPen(QColor(255, 255, 255, 78), 1.2))
+            else:
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(QColor(255, 255, 255, 30), 1.2))
+            p.drawEllipse(QPointF(nx, cy), r, r)
+
+            # 圆点里的字 / 勾
+            if st == "done":
+                p.setPen(QColor(255, 255, 255, 220))
+                p.setFont(ui_font(13, QFont.Bold))
+                p.drawText(QRectF(nx - r, cy - r, r * 2, r * 2),
+                           Qt.AlignCenter, "✓")
+                p.setFont(f_lab)
+            else:
+                col = QColor(C["primary"]) if st == "active" else QColor(255, 255, 255, 105)
+                p.setPen(col)
+                p.setFont(ui_font(12.5, QFont.Bold))
+                p.drawText(QRectF(nx - r, cy - r, r * 2, r * 2),
+                           Qt.AlignCenter, str(i + 1))
+                p.setFont(f_lab)
+
+            # 文字
+            tx = x + self.NODE + self.GAP
+            if st == "active":
+                col, weight = QColor(255, 255, 255, 250), QFont.Bold
+            elif st == "done":
+                col, weight = QColor(255, 255, 255, 200), QFont.DemiBold
+            else:
+                col, weight = QColor(255, 255, 255, 108), QFont.Normal
+            p.setFont(ui_font(13, weight))
+            p.setPen(col)
+            p.drawText(QRectF(tx, 0, widths[i] - self.NODE - self.GAP, h),
+                       Qt.AlignVCenter | Qt.AlignLeft, STEPS[i])
+            p.setFont(f_lab)
+
+            x += widths[i] + link
+
+
+# ==========================================================================
+# 卡片
+# ==========================================================================
+class Card(QFrame):
+    """主容器卡片。
+
+    参考站没有 box-shadow，是因为它用满幅影像造深度；纯色平面上照搬
+    「零投影」，结果就是纸片贴在一起。这里用分层柔投影 + 极浅渐变 +
+    发丝描边把深度补回来。
+    """
+
+    def __init__(self, title: str = "", subtitle: str = "", parent=None,
+                 shadow: bool = True):
         super().__init__(parent)
         self.setObjectName("Card")
         self.body = QVBoxLayout(self)
-        self.body.setContentsMargins(20, 18, 20, 18)
-        self.body.setSpacing(12)
+        self.body.setContentsMargins(24, 22, 24, 22)
+        self.body.setSpacing(14)
         if title:
             t = QLabel(title)
             t.setObjectName("CardTitle")
@@ -47,43 +414,16 @@ class Card(QFrame):
             s.setObjectName("Hint")
             s.setWordWrap(True)
             self.body.addWidget(s)
-        sh = QGraphicsDropShadowEffect(self)
-        sh.setBlurRadius(18)
-        sh.setOffset(0, 2)
-        sh.setColor(QColor(20, 24, 40, 22))
-        self.setGraphicsEffect(sh)
-
-
-class StepBar(QWidget):
-    """顶部的步骤指示条。"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.current = 0
-        self._lay = QHBoxLayout(self)
-        self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.setSpacing(8)
-        self.labels = []
-        for i in range(len(STEPS)):
-            lb = QLabel()
-            lb.setTextFormat(Qt.RichText)
-            self._lay.addWidget(lb)
-            self.labels.append(lb)
-            if i < len(STEPS) - 1:
-                arrow = QLabel("›")
-                arrow.setStyleSheet(f"color:{C['text_faint']};font-size:16px;")
-                self._lay.addWidget(arrow)
-        self._lay.addStretch(1)
-        self.set_current(0)
-
-    def set_current(self, index: int):
-        self.current = index
-        for i, lb in enumerate(self.labels):
-            lb.setText(step_chip(i, index))
+        if shadow:
+            apply_shadow(self, "card")
 
 
 class ModeCard(QFrame):
-    """模式选择用的大卡片。"""
+    """模式选择用的大卡片。
+
+    结构照搬参考站的图卡：眉标 → 大标题 → 说明 → 要点；
+    右上角放一个超大幽灵数字，作为整屏里唯一的「大字号装饰」。
+    """
 
     clicked = Signal(int)
 
@@ -92,42 +432,71 @@ class ModeCard(QFrame):
         super().__init__(parent)
         self.index = index
         self.setObjectName("CardFlat")
+        self.setProperty("hovered", "false")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(150)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 16, 18, 16)
-        lay.setSpacing(8)
+        self.setMinimumHeight(232)
+        self._sh = ShadowAnim(self, "card")
 
-        head = QHBoxLayout()
-        t = QLabel(f"<b>{title}</b>")
-        t.setStyleSheet("font-size:16px;")
-        head.addWidget(t)
-        head.addStretch(1)
-        b = QLabel(badge)
-        b.setStyleSheet(f"background:{C['primary_light']};color:{C['primary']};"
-                        f"padding:3px 10px;border-radius:10px;font-size:12px;")
-        head.addWidget(b)
-        lay.addLayout(head)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 22, 24, 22)
+        lay.setSpacing(10)
+
+        lay.addWidget(eyebrow(badge))
+
+        t = QLabel(title)
+        t.setObjectName("CardTitle")
+        t.setWordWrap(True)
+        lay.addWidget(t)
 
         d = QLabel(desc)
         d.setWordWrap(True)
-        d.setStyleSheet(f"color:{C['text_dim']};")
+        d.setObjectName("Hint")
         lay.addWidget(d)
 
+        lay.addSpacing(4)
         for x in bullets:
-            lb = QLabel("• " + x)
+            row = QHBoxLayout()
+            row.setSpacing(9)
+            tick = QLabel("—")
+            tick.setStyleSheet(f"color:{C['primary_soft']};font-weight:700;")
+            tick.setFixedWidth(12)
+            row.addWidget(tick, 0, Qt.AlignTop)
+            lb = QLabel(x)
             lb.setWordWrap(True)
-            lb.setStyleSheet(f"color:{C['text_faint']};font-size:12.5px;")
-            lay.addWidget(lb)
+            lb.setObjectName("Faint")
+            row.addWidget(lb, 1)
+            lay.addLayout(row)
         lay.addStretch(1)
 
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        # 幽灵数字
+        p.setFont(ui_font(56, QFont.Bold))
+        col = QColor(C["primary"])
+        col.setAlpha(20 if self.property("hovered") == "true" else 13)
+        p.setPen(col)
+        p.drawText(QRectF(0, 2, self.width() - 22, 68),
+                   Qt.AlignRight | Qt.AlignTop, f"0{self.index}")
+        # 悬停时顶部浮现一条绿色强调条
+        if self.property("hovered") == "true":
+            pen = QPen(QColor(C["primary_soft"]), 2.5)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            p.drawLine(QPointF(24, 1), QPointF(self.width() - 24, 1))
+
     def enterEvent(self, e):
-        self.setStyleSheet(f"QFrame#CardFlat{{border:2px solid {C['primary']};"
-                           f"border-radius:10px;background:{C['card']};}}")
+        self.setProperty("hovered", "true")
+        repolish(self)
+        self._sh.to("raised")
         super().enterEvent(e)
 
     def leaveEvent(self, e):
-        self.setStyleSheet("")
+        self.setProperty("hovered", "false")
+        repolish(self)
+        self._sh.to("card")
         super().leaveEvent(e)
 
     def mouseReleaseEvent(self, e):
@@ -137,21 +506,30 @@ class ModeCard(QFrame):
 
 
 class CourseCard(QFrame):
-    """课程详情小卡片。"""
+    """课程详情小卡片：左侧一条状态色条，状态一眼看出来。"""
 
     remove_requested = Signal(int)
+
+    RAIL = {"ok": "primary", "warn": "warn_mid", "err": "danger_mid",
+            "info": "text_ghost"}
+    # 左边留出 22px 给色条
+    PAD_L = 24
 
     def __init__(self, index: int, parent=None):
         super().__init__(parent)
         self.index = index
         self.setObjectName("CardFlat")
+        self._kind = "info"
+        self._sh = ShadowAnim(self, "card")
+
         self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(16, 14, 16, 14)
-        self.lay.setSpacing(6)
+        self.lay.setContentsMargins(self.PAD_L, 16, 18, 16)
+        self.lay.setSpacing(8)
 
         head = QHBoxLayout()
+        head.setSpacing(10)
         self.title = QLabel("—")
-        self.title.setStyleSheet("font-size:15px;font-weight:600;")
+        self.title.setStyleSheet("font-size:15px;font-weight:700;")
         head.addWidget(self.title, 1)
         self.badge = QLabel("")
         self.badge.setVisible(False)
@@ -165,7 +543,7 @@ class CourseCard(QFrame):
 
         self.meta = QLabel("")
         self.meta.setWordWrap(True)
-        self.meta.setStyleSheet(f"color:{C['text_dim']};")
+        self.meta.setObjectName("Faint")
         self.lay.addWidget(self.meta)
 
         self.status = QLabel("")
@@ -173,8 +551,31 @@ class CourseCard(QFrame):
         self.status.setVisible(False)
         self.lay.addWidget(self.status)
 
+    # -- 绘制左色条 ----------------------------------------------------
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        col = QColor(C[self.RAIL.get(self._kind, "text_ghost")])
+        p.setPen(Qt.NoPen)
+        p.setBrush(col)
+        p.drawRoundedRect(QRectF(10, 13, 4.0, max(10, self.height() - 26)), 2.0, 2.0)
+
+    def _set_kind(self, kind: str):
+        if kind != self._kind:
+            self._kind = kind
+            self.update()
+
+    def enterEvent(self, e):
+        self._sh.to("raised")
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._sh.to("card")
+        super().leaveEvent(e)
+
+    # -- 内容 ----------------------------------------------------------
     def set_course(self, entry, selected_rows=None):
-        """把课程条目渲染成卡片。"""
         name = entry.resolved_name or entry.name or entry.kch or "（未命名）"
         self.title.setText(name)
 
@@ -203,7 +604,7 @@ class CourseCard(QFrame):
             parts = []
             kyl = g("kyl")
             if kyl is not None and kyl >= 0:
-                color = C["accent"] if kyl > 0 else C["text_dim"]
+                color = C["primary"] if kyl > 0 else C["text_faint"]
                 parts.append(f'<span style="color:{color}"><b>课余量 {kyl}</b></span>')
             q = g("queue")
             if q:
@@ -220,32 +621,117 @@ class CourseCard(QFrame):
             self.status.setVisible(False)
 
     def set_state(self, text: str, kind: str = "info"):
-        color = {"ok": C["accent"], "warn": C["warn"],
+        color = {"ok": C["primary"], "warn": C["warn"],
                  "err": C["danger"], "info": C["text_dim"]}.get(kind, C["text_dim"])
         self.status.setText(text)
-        self.status.setStyleSheet(f"color:{color};")
+        self.status.setStyleSheet(f"color:{color};font-size:13px;")
         self.status.setVisible(True)
+        self._set_kind(kind)
 
     def set_badge(self, text: str, kind: str = "ok"):
-        colors = {"ok": (C["accent"], "#E8F6EF"),
-                  "warn": (C["warn"], "#FDF3E7"),
-                  "err": (C["danger"], "#FDECEA"),
-                  "info": (C["text_dim"], "#EEF0F3")}
+        colors = {"ok": (C["primary"], C["accent_light"]),
+                  "warn": (C["warn"], C["warn_light"]),
+                  "err": (C["danger"], C["danger_light"]),
+                  "info": (C["text_dim"], C["bg_soft"])}
         fg, bg = colors.get(kind, colors["info"])
         self.badge.setText(text)
-        self.badge.setStyleSheet(f"background:{bg};color:{fg};padding:3px 10px;"
-                                 f"border-radius:10px;font-size:12px;")
+        self.badge.setStyleSheet(
+            f"background:{bg};color:{fg};padding:4px 12px;"
+            f"border-radius:11px;font-size:12px;font-weight:700;")
         self.badge.setVisible(bool(text))
+        self._set_kind(kind)
+
+
+class GlowButton(QPushButton):
+    """主行动按钮：绿色辉光。
+
+    整屏只有一两个这种按钮，辉光让「该点哪个」一眼可见 ——
+    也让纯色平面上唯一的深色块有了发光感，而不是一块贴上去的绿纸。
+    禁用时辉光自动收掉，否则灰按钮配绿光会很怪。
+    """
+
+    def __init__(self, text: str, parent=None, strength: int = 92):
+        super().__init__(text, parent)
+        self.setObjectName("Primary")
+        self._strength = strength
+        eff = QGraphicsDropShadowEffect(self)
+        eff.setOffset(0, 7)
+        eff.setBlurRadius(24)
+        eff.setColor(QColor(15, 66, 35, strength))
+        self.setGraphicsEffect(eff)
+        self._eff = eff
+
+    def changeEvent(self, e):
+        if e.type() == QEvent.EnabledChange:
+            self._eff.setColor(
+                QColor(15, 66, 35, self._strength if self.isEnabled() else 0))
+        super().changeEvent(e)
+
+
+class StatTile(QFrame):
+    """统计块：小标签（带状态点）在上，大数字在下。
+
+    标签压在数字之上，是参考站那套「小字眉标 → 大字号」层级的最小用法。
+    旧版是「大数字 + 下面一行小字」，四个并排就是四条一模一样的白矩形。
+    """
+
+    def __init__(self, label: str, value: str = "—", accent: str = None,
+                 parent=None):
+        super().__init__(parent)
+        self.setObjectName("CardFlat")
+        self._accent = accent or C["primary_soft"]
+        self._sh = ShadowAnim(self, "card")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(20, 17, 20, 17)
+        lay.setSpacing(9)
+
+        head = QHBoxLayout()
+        head.setSpacing(9)
+        self._dot = QLabel()
+        self._dot.setFixedSize(7, 7)
+        self._dot.setStyleSheet(
+            f"background:{self._accent};border-radius:3px;")
+        head.addWidget(self._dot, 0, Qt.AlignVCenter)
+        self.l = QLabel(label)
+        self.l.setObjectName("StatLabel")
+        head.addWidget(self.l, 1)
+        lay.addLayout(head)
+
+        self.v = QLabel(value)
+        self.v.setObjectName("StatValue")
+        lay.addWidget(self.v)
+
+    def set_accent(self, color: str):
+        self._accent = color
+        self._dot.setStyleSheet(f"background:{color};border-radius:3px;")
+
+    def set(self, value: str):
+        self.v.setText(str(value))
+
+    def enterEvent(self, e):
+        self._sh.to("raised")
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._sh.to("card")
+        super().leaveEvent(e)
+
+
+# 旧名字，pages.py 里还在用
+StatBox = StatTile
 
 
 class Dot(QWidget):
-    """小圆点状态指示器。"""
+    """状态点：可选一圈柔光（监听中时呼吸用）。"""
 
-    def __init__(self, color: str = None, size: int = 10, parent=None):
+    def __init__(self, color: str = None, size: int = 10, halo: bool = True,
+                 parent=None):
         super().__init__(parent)
         self._color = QColor(color or C["text_faint"])
         self._size = size
-        self.setFixedSize(size + 2, size + 2)
+        self._halo = halo
+        pad = int(size * 1.5) if halo else 2
+        self.setFixedSize(size + pad * 2, size + pad * 2)
 
     def set_color(self, color: str):
         self._color = QColor(color)
@@ -253,27 +739,17 @@ class Dot(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        cx, cy = self.width() / 2.0, self.height() / 2.0
+        if self._halo:
+            g = QRadialGradient(QPointF(cx, cy), self._size * 2.0)
+            h = QColor(self._color); h.setAlpha(70)
+            g.setColorAt(0.0, h)
+            h2 = QColor(self._color); h2.setAlpha(0)
+            g.setColorAt(1.0, h2)
+            p.setPen(Qt.NoPen)
+            p.setBrush(g)
+            p.drawEllipse(QPointF(cx, cy), self._size * 2.0, self._size * 2.0)
         p.setBrush(self._color)
         p.setPen(Qt.NoPen)
-        p.drawEllipse(1, 1, self._size, self._size)
-
-
-class StatBox(QFrame):
-    """监控页上的小统计块。"""
-
-    def __init__(self, label: str, value: str = "—", parent=None):
-        super().__init__(parent)
-        self.setObjectName("CardFlat")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(2)
-        self.v = QLabel(value)
-        self.v.setStyleSheet("font-size:19px;font-weight:600;")
-        lay.addWidget(self.v)
-        self.l = QLabel(label)
-        self.l.setStyleSheet(f"color:{C['text_faint']};font-size:12px;")
-        lay.addWidget(self.l)
-
-    def set(self, value: str):
-        self.v.setText(str(value))
+        p.drawEllipse(QPointF(cx, cy), self._size / 2.0, self._size / 2.0)

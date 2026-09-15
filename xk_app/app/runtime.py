@@ -127,6 +127,20 @@ def find_doc(name: str = "使用说明.html") -> str | None:
     return None
 
 
+def find_asset(name: str) -> str | None:
+    """找到随包发布的资源文件（图标等）。
+
+    打包后在 `_internal\\assets`，开发时在项目 `assets`。
+    exe 本身已经内嵌了图标，但窗口图标要单独设 —— 否则开发运行时
+    任务栏显示的是 Python 的默认图标。
+    """
+    for base in (bundle_root() / "assets", bundle_root().parent / "assets"):
+        p = base / name
+        if p.exists():
+            return str(p)
+    return None
+
+
 def describe_environment() -> dict:
     d = {
         "frozen": is_frozen(),

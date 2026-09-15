@@ -15,8 +15,8 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
 
 from .core import BrowserCore
 from .pages import LoginPage, ModePage, CoursesPage, ConfirmPage, MonitorPage
-from .theme import C, stylesheet
-from .widgets import StepBar
+from .theme import stylesheet
+from .widgets import HeroBand, LogoMark
 from ..config import AppConfig, CourseEntry, Paths, APP_DISPLAY_NAME, APP_VERSION
 from ..browser import COURSE_KINDS
 from ..secretstore import SecretStore, redactor
@@ -46,29 +46,38 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        # ---- 顶部标题 + 步骤条 ----
-        header = QFrame()
-        header.setStyleSheet(f"background:{C['card']};border-bottom:1px solid {C['border']};")
-        hl = QVBoxLayout(header)
-        hl.setContentsMargins(28, 14, 28, 12)
-        hl.setSpacing(8)
-        top = QHBoxLayout()
-        logo = QLabel("学校选课助手")
-        logo.setStyleSheet(f"font-size:17px;font-weight:700;color:{C['primary']};")
-        top.addWidget(logo)
-        top.addStretch(1)
+        # ---- 顶部：深色 Hero 带（玻璃导航胶囊 + 步骤导轨）----
+        # 参考站的 nav 是一条浮在深色影像上的玻璃胶囊，不是通栏白条。
+        # 这里给桌面应用补上等价的「深色底」：一块深墨绿渐变面板。
+        # 登录页不显示这条带子 —— 那一页整屏都是深色品牌分栏，见 pages.LoginPage。
+        self.band = HeroBand()
+        nr = self.band.nav_row
+
+        nr.addWidget(LogoMark(32, "清", dark=True))
+
+        logo = QLabel(APP_DISPLAY_NAME)
+        logo.setObjectName("Wordmark")
+        nr.addWidget(logo)
+
+        nr.addSpacing(8)
+        sep = QLabel()
+        sep.setFixedSize(1, 20)
+        sep.setStyleSheet("background: rgba(255, 255, 255, 0.16);")
+        nr.addWidget(sep)
+        nr.addSpacing(2)
+
         self.btn_help = QPushButton("使用说明")
-        self.btn_help.setObjectName("Ghost")
+        self.btn_help.setObjectName("NavGhost")
         self.btn_help.setCursor(Qt.PointingHandCursor)
         self.btn_help.clicked.connect(self.on_help)
-        top.addWidget(self.btn_help)
+        nr.addWidget(self.btn_help)
+
         self.lb_user = QLabel("")
-        self.lb_user.setObjectName("Hint")
-        top.addWidget(self.lb_user)
-        hl.addLayout(top)
-        self.steps = StepBar()
-        hl.addWidget(self.steps)
-        lay.addWidget(header)
+        self.lb_user.setObjectName("NavMeta")
+        nr.addWidget(self.lb_user)
+
+        self.steps = self.band.rail
+        lay.addWidget(self.band)
 
         # ---- 页面 ----
         self.stack = QStackedWidget()
@@ -106,6 +115,7 @@ class MainWindow(QMainWindow):
         self.page_mode.chosen.connect(self.on_mode)
         self.page_mode.back.connect(lambda: self.goto(0))
         self.page_login.btn_forget.clicked.connect(self.on_forget)
+        self.page_login.btn_help.clicked.connect(self.on_help)
         self.page_courses.add_course.connect(self.on_add_course)
         self.page_courses.remove_course.connect(self.on_remove_course)
         self.page_courses.validate.connect(self.on_validate)
@@ -123,6 +133,8 @@ class MainWindow(QMainWindow):
     def goto(self, index: int):
         self.stack.setCurrentIndex(index)
         self.steps.set_current(index)
+        # 登录页整屏是深色品牌分栏，顶上的深色带会让两片深色撞在一起
+        self.band.setVisible(index != 0)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
             self.page_courses.set_headless(self.cfg.headless)
@@ -139,11 +151,16 @@ class MainWindow(QMainWindow):
         """
         user = (user or "").strip()
         if not user:
-            self.lb_user.setText("")
+            text = ""
         elif len(user) > 5:
-            self.lb_user.setText(f"学号 {user[:3]}****{user[-2:]}")
+            text = f"学号 {user[:3]}****{user[-2:]}"
         else:
-            self.lb_user.setText(f"学号 {user}")
+            text = f"学号 {user}"
+        self.lb_user.setText(text)
+        # 登录页不显示顶部导航，那一页的同一个信息挂在品牌面板底部
+        brand = getattr(self.page_login, "lb_user_brand", None)
+        if brand is not None:
+            brand.setText(text)
 
     # ------------------------------------------------------------------
     def on_login(self, user, pwd, remember, trust):
@@ -345,7 +362,7 @@ class MainWindow(QMainWindow):
         self.entries = []
         self.results = {}
         self.save_config()
-        self.lb_user.setText("")
+        self._set_user_label("")
         if ok and reset_profile:
             msg = ("已清除密码，并重置了浏览器身份。下次登录可能需要二次验证。")
         elif ok:
