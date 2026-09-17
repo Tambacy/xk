@@ -70,26 +70,23 @@ def selftest() -> int:
     print()
     print("正在尝试启动浏览器…")
     try:
-        log.info("自检：import playwright")
-        from playwright.sync_api import sync_playwright
-        log.info("自检：sync_playwright() 开始")
-        with sync_playwright() as p:
-            log.info("自检：驱动已就绪")
-            kw = {"headless": True}
-            if exe:
-                kw["executable_path"] = exe
-            log.info("自检：launch(%s)", kw)
-            b = p.chromium.launch(**kw)
-            print(f"  ✅ 浏览器启动成功：{b.version}")
-            log.info("自检：浏览器启动成功 %s", b.version)
-            ctx = b.new_context()
-            page = ctx.new_page()
-            page.goto("http://zhjwxk.cic.tsinghua.edu.cn/xklogin.do",
-                      wait_until="domcontentloaded", timeout=45000)
-            print(f"  ✅ 打开选课系统入口成功：{(page.url or '')[:70]}")
-            log.info("自检：网络可达 %s", page.url)
-            ctx.close()
-            b.close()
+        log.info("自检：准备浏览器")
+        # 这里**必须走和正式运行完全相同的浏览器配置**。
+        #
+        # 以前自检是裸的 p.chromium.launch(headless=True) 去打开选课入口，
+        # 那等于用「无头 + navigator.webdriver=true + UA 带 HeadlessChrome」
+        # 的身份访问学校服务器 —— 自检本来是为了确认能用，结果每跑一次就
+        # 主动留下一条"这是脚本"的记录。
+        from app.browser import ScholarBrowser
+        sb = ScholarBrowser(paths.profile, log=lambda m, l="INFO": None)
+        try:
+            sb.start()
+            sb.page.goto("http://zhjwxk.cic.tsinghua.edu.cn/xklogin.do",
+                         wait_until="domcontentloaded", timeout=45000)
+            print(f"  ✅ 打开选课系统入口成功：{(sb.page.url or '')[:70]}")
+            log.info("自检：网络可达 %s", sb.page.url)
+        finally:
+            sb.stop()
     except Exception as e:
         print(f"  ❌ 浏览器自检失败：{type(e).__name__}: {e}")
         log.error("自检失败", exc_info=True)

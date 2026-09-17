@@ -153,10 +153,6 @@ class BrowserCore(QThread):
     def do_start(self):
         self._jobs.put(("start", None))
 
-    def do_set_headless(self, headless: bool):
-        """切「可见窗口 / 后台无窗口」。浏览器已经起来了就当场重建。"""
-        self.cfg.headless = bool(headless)
-        self._jobs.put(("headless", bool(headless)))
 
     def request_selected(self):
         """请工作线程读一次已选课程。"""
@@ -187,7 +183,7 @@ class BrowserCore(QThread):
     def run(self):
         try:
             self.browser = ScholarBrowser(
-                self.paths.profile, xnxq=self.cfg.xnxq, headless=self.cfg.headless,
+                self.paths.profile, xnxq=self.cfg.xnxq,
                 viewport=tuple(self.cfg.viewport), log=self.say,
                 actor=HumanActor(NORMAL, self.say))
             self.browser.start()
@@ -212,8 +208,6 @@ class BrowserCore(QThread):
                     self._handle_validate(*payload)
                 elif job == "start":
                     self._handle_start()
-                elif job == "headless":
-                    self._handle_set_headless(payload)
                 elif job == "quit":
                     break
             except Exception as e:
@@ -274,21 +268,6 @@ class BrowserCore(QThread):
                 self.say(f"读取学期失败：{e}", "WARN")
         self.logged_in.emit(ok, msg)
 
-    def _handle_set_headless(self, headless: bool):
-        """切换有头/无头。profile 目录不动，所以「信任此设备」状态不会丢。"""
-        self.cfg.headless = bool(headless)
-        if self.browser is None:
-            return
-        self.browser.set_preference(bool(headless))
-        if self.browser.headless == bool(headless):
-            return
-        try:
-            self.browser.restart(headless=bool(headless))
-            self.say(f"浏览器已切换为"
-                     f"{'后台无窗口' if headless else '可见窗口'}。")
-        except Exception as e:
-            log.error("切换浏览器模式失败", exc_info=True)
-            self.say(f"切换浏览器模式失败：{e}", "ERROR")
 
     def _handle_validate(self, index: int, entry: CourseEntry, selected: list,
                          drop_entries: list | None = None):

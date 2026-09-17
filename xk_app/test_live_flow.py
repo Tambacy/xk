@@ -49,7 +49,7 @@ def rule(t=""):
         say("=" * 78)
 
 
-b = ScholarBrowser(paths.profile, headless=True, log=lambda m, l="INFO": None,
+b = ScholarBrowser(paths.profile, log=lambda m, l="INFO": None,
                    actor=HumanActor(NORMAL, lambda m, l="INFO": None))
 
 rule("① 登录")
@@ -121,7 +121,6 @@ cfg.mode = 3
 cfg.poll_avg = 3.0
 cfg.night_silence = []
 cfg.dry_run = True
-cfg.headless = True
 targets = [CourseEntry(action="grab", kind="ty", kch="10721071", kxh="2",
                        name="三年级男生乒乓球", time_text="4-1")]
 if sel:

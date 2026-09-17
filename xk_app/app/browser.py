@@ -32,6 +32,8 @@ from typing import Callable
 from urllib.parse import urlencode
 
 from .humanize import HumanActor, NORMAL, URGENT
+from .runtime import logical_screen
+from . import fingerprint
 
 BASE = "http://zhjwxk.cic.tsinghua.edu.cn/"
 XKLOGIN = BASE + "xklogin.do"
@@ -116,17 +118,24 @@ def _int(s) -> int:
 
 
 class ScholarBrowser:
-    """长期存活的浏览器会话：登录 + 所有教务系统操作。"""
+    """长期存活的浏览器会话：登录 + 所有教务系统操作。
+
+    **只用有头模式（可见窗口），没有无头分支。**
+
+    无头省的那点桌面空间，代价是一整类可判定的破绽：没有真实窗口就
+   沒有真实的 screen / outer / inner 关系，没有窗口意味着没有最小化、
+    没有焦点变化、没有 IME 上下文，UA 里还会带 "HeadlessChrome"。
+    这些都能靠 CDP 和 JS 补，但补出来的是一致性，不是真实性 ——
+    真实窗口本来就不要补。
+    """
 
     def __init__(self, profile_dir: str | Path, *,
                  xnxq: str = "2026-2027-1",
-                 headless: bool = False,
                  viewport: tuple[int, int] = (1366, 900),
                  log: Callable[[str, str], None] | None = None,
                  actor: HumanActor | None = None):
         self.profile_dir = Path(profile_dir)
         self.xnxq = xnxq
-        self.headless = headless
         self.viewport = viewport
         self._log = log or (lambda msg, level="INFO": None)
         self.actor = actor or HumanActor(NORMAL, self._log)
@@ -134,7 +143,7 @@ class ScholarBrowser:
         self._ctx = None
         self.page = None
         self._loaded: tuple | None = None
-        self.prefer_headless = headless   # 用户的偏好模式（登录临时切可见后要回到这个）
+        self._fp_cache: dict | None = None   # 身份对齐的缓存（内含 CDP session 引用）
         # 统一身份认证对短时间内的重复登录很敏感：会回 sso_fail，甚至把要求
         # 从「直接登录」升级成图形验证码 / 短信二次认证。所以不管是谁来调用
         # login（界面、调度器、自动重登都会），两次**提交**之间都强制留间隔。
@@ -166,60 +175,88 @@ class ScholarBrowser:
             return
         from playwright.sync_api import sync_playwright
         self.profile_dir.mkdir(parents=True, exist_ok=True)
-        self.log(f"启动浏览器（{'后台无窗口' if self.headless else '可见窗口'}）…")
-        self._tr(f"launch profile={self.profile_dir} headless={self.headless} "
+        self.log("启动浏览器（可见窗口）…")
+        self._tr(f"launch profile={self.profile_dir} "
                  f"viewport={self.viewport[0]}x{self.viewport[1]}")
         self._pw = sync_playwright().start()
+        # 屏幕的真实逻辑尺寸：用来钳住窗口。
+        # 不钳的话小屏机器上窗口会高过屏幕，页面里就是 outerHeight >
+        # screen.height —— 物理上不成立，一次加载即可判定。
+        sw, sh, sdpr = logical_screen()
+        want_w, want_h = int(self.viewport[0]), int(self.viewport[1])
+
         launch_kw = dict(
             user_data_dir=str(self.profile_dir),
-            headless=self.headless,
+            headless=False,               # 只用有头，理由见类文档
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-first-run", "--no-default-browser-check",
                 "--disable-features=Translate,AcceptCHFrame",
-                # 固定缩放为 1，避免不同机器 DPI 缩放影响坐标换算
-                "--force-device-scale-factor=1",
             ],
-            viewport={"width": int(self.viewport[0]), "height": int(self.viewport[1])},
             locale="zh-CN",
             timezone_id="Asia/Shanghai",
         )
+        # 窗口尺寸交给**真实窗口**，不用 Playwright 的视口模拟。
+        # 用视口模拟时 Playwright 会把 screen 一起设成视口大小，于是
+        # screen.width == innerWidth、甚至 outerWidth > screen.width
+        # （窗口比屏幕还宽）—— 两个都物理上不成立。
+        # 真实窗口下 screen / outer / inner / dpr 全是真值。
+        w, h = want_w, want_h
+        if sw and sh:
+            w = min(w, max(640, sw - 20))
+            h = min(h, max(480, sh - 60))
+        launch_kw["args"] = launch_kw["args"] + [f"--window-size={w},{h}"]
+        launch_kw["no_viewport"] = True
         # 装了随包浏览器时，显式指向完整 Chromium：
         # 1) 安装包只需带一份浏览器（不用再带 headless shell）
         # 2) 保证别人电脑上用的就是我们测过的那一版，行为完全一致
         try:
-            from .runtime import find_bundled_chromium, chrome_user_agent
+            from .runtime import find_bundled_chromium
             exe = find_bundled_chromium()
             if exe:
                 launch_kw["executable_path"] = exe
                 self._tr(f"使用随包 Chromium：{exe}")
-            # 无头浏览器的 UA 会带 "HeadlessChrome"，这是最直白的破绽，
-            # 换成与浏览器实际版本一致的正版 Chrome UA。
-            if self.headless:
-                ua = chrome_user_agent()
-                if ua:
-                    launch_kw["user_agent"] = ua
-                    self._tr(f"无头模式：UA 已替换为 {ua[-40:]}")
         except Exception:
             pass
         self._ctx = self._pw.chromium.launch_persistent_context(**launch_kw)
-        # navigator.webdriver 是最扎眼的自动化标记，抹掉
-        self._ctx.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined, configurable: true});"
-        )
-        # 无头模式还有一堆别的破绽（插件为 0、没有 window.chrome、
-        # WebGL 报软件渲染……），额外补一层。有头模式本来就没有这些问题，
-        # 不需要也不应该去"伪装"成别的样子。
-        if self.headless:
-            try:
-                from .stealth import build_init_script
-                self._ctx.add_init_script(build_init_script())
-                self._tr("无头模式：已注入反检测脚本")
-            except Exception as e:
-                self.log(f"注入反检测脚本失败（不影响使用）：{e}", "WARN")
+        # 这里**故意不再注入 webdriver 的 init_script**。
+        #
+        # 以前注入的是 `{get: () => undefined}`。但正常浏览器里
+        # navigator.webdriver 的值是 **false**，不是 undefined ——
+        # 于是 `navigator.webdriver !== false` 反而成了一个更容易命中的
+        # 判据，而且用 defineProperty 覆盖原型 getter 之后，
+        # getOwnPropertyDescriptor 一看就知道不是原生的。
+        #
+        # 实测：只靠上面那个 `--disable-blink-features=AutomationControlled`
+        # 启动参数，Chromium 的**原生 getter** 就会返回 false ——
+        # 值和原生性都对，什么都不用改。
+        # 这里**不注入任何 JS 补妆脚本**。
+        #
+        # 实测（2026-09，逐项对着真实浏览器量过）：这个 Chromium 在无头下
+        # 本来就是对的 —— 插件 5 个且名字与真 Chrome 一致、mimeTypes 2 个、
+        # pdfViewerEnabled 为 true、window.chrome.app 在、WebGL 报的是真显卡
+        # （RTX 4070，不是 SwiftShader）、navigator 上没有任何多余的自有属性。
+        #
+        # （曾经有个 stealth.py 干这事，已经删掉了。）
+# 那种补妆是用 Object.defineProperty 把 plugins / mimeTypes /
+        # pdfViewerEnabled **定义在 navigator 实例上**，于是
+        # `Object.getOwnPropertyNames(navigator).length` 从 0 变成 3 ——
+        # 真 Chrome 是 0。也就是说：它在修一个不存在的问题，同时制造了一个
+        # 更容易命中的破绽。
+        #
+        # 无头模式真正需要处理的只有 UA 里的 "HeadlessChrome"（见上面），
+        # 以及品牌列表（由 fingerprint 模块处理）。
         self.page = self._ctx.pages[0] if self._ctx.pages else self._ctx.new_page()
         self.page.set_default_timeout(20000)
         self.page.on("dialog", self._on_dialog)
+        # 身份对齐：随包的是 Chromium，它的品牌列表里**只有 "Chromium"**，
+        # 而正常用户要么 Chrome 要么 Edge —— 一行 JS 就能查出来。
+        # 用 CDP 在浏览器进程层面把品牌补成真 Chrome 的样子：
+        # navigator.userAgentData 仍是原生 getter，JS 侧查不出痕迹。
+        try:
+            self._fp_cache = fingerprint.install(self._ctx, self.page, log=self.log)
+        except Exception as e:
+            self.log(f"对齐浏览器身份失败（不影响使用）：{e}", "WARN")
         # 当前页面标记：用来判断"现在页面上摆的是哪一类课程的列表"，
         # 避免把别的类别的数据当成目标课程的。
         self.current_list: dict | None = None      # {"kind": "ty", "kch": "10721071"}
@@ -256,18 +293,15 @@ class ScholarBrowser:
         self._ctx = self._pw = self.page = None
         self._loaded = None
 
-    def restart(self, *, headless: bool | None = None):
-        """换一种有头/无头设置重建浏览器（**profile 目录不变**）。
+    def restart(self):
+        """重建浏览器（**profile 目录不变**）。
 
         为什么强调 profile 不变：统一身份认证的「信任此设备」状态就存在这个
         目录里。换个目录等于换了一台新电脑，服务端会立刻要求二次验证。
         """
-        if headless is None:
-            headless = self.headless
-        self.log(f"重新打开浏览器（{'后台无窗口' if headless else '可见窗口'}）…")
-        self._tr(f"restart headless {self.headless} -> {headless}")
+        self.log("重新打开浏览器（可见窗口）…")
+        self._tr("restart")
         self.stop()
-        self.headless = headless
         self.start()
         try:
             self.page.bring_to_front()
@@ -276,32 +310,20 @@ class ScholarBrowser:
         return self
 
     def ensure_visible(self, on_progress: Callable[[str], None] | None = None) -> bool:
-        """确保浏览器是「可见窗口」；无头就自动重启成有头。
+        """把浏览器窗口提到最前。
 
-        二次验证（短信/微信）和图形验证码都必须真人在窗口里点，无头模式下
-        用户看不到也点不到。与其让用户自己去找某个设置项改，不如在需要的那
-        一刻自动换过来。
+        以前这里还要处理「无头 -> 有头」的切换；现在只用有头，它就只剩
+        「确保窗口在最前面」这一个作用 —— 二次验证（短信/微信）和图形验证码
+        都要真人在窗口里点，窗口必须可见、可点。
 
-        返回 True 表示真的重启了。
+        返回值保留但恒为 False（表示没有重建过浏览器）。
         """
-        if not self.headless:
-            try:
-                self.page.bring_to_front()      # 已经在前面了也顺手提到最前
-            except Exception:
-                pass
-            return False
-        self.log("需要你本人操作，正在自动切换为「可见窗口」…", "WARN")
-        if on_progress:
-            try:
-                on_progress("正在打开可见的浏览器窗口，请稍候…")
-            except Exception:
-                pass
-        self.restart(headless=False)
-        return True
+        try:
+            self.page.bring_to_front()
+        except Exception:
+            pass
+        return False
 
-    def set_preference(self, headless: bool):
-        """记录用户的偏好模式（登录做完后会回到这个模式）。"""
-        self.prefer_headless = bool(headless)
 
     # ------------------------------------------------------------------
     # 浏览器窗口被关掉之后的自我修复
@@ -333,24 +355,23 @@ class ScholarBrowser:
                on_progress: Callable[[str], None] | None = None) -> bool:
         """把被关掉的浏览器重新拉起来（**同一个 profile 目录**，登录态还在）。
 
-        visible=False（默认，自动恢复用）：拉到**后台**跑。用户主动关掉那个窗口
-            通常就是不想看见它，我们要是一恢复就把它弹出来，等于跟他对着干。
-        visible=True（需要真人操作时）：拉成可见窗口。
+        只用有头，所以重开出来的一定是可见窗口。窗口被关掉之后用户多半
+        是希望它回来的（不然监听就断了），露出来是合理的。
+
+        visible 参数保留只为兼容旧调用，现在没有作用。
 
         注意 profile 目录不会变 —— 「信任此设备」的状态就存在里面。
         """
         if self.is_alive():
             return True
-        target_headless = not visible
         if on_progress:
             try:
                 on_progress("浏览器窗口已关闭，正在重新打开…")
             except Exception:
                 pass
-        self.log(f"浏览器窗口已关闭，正在重新打开"
-                 f"（{'后台运行' if target_headless else '可见窗口'}，登录态保留）…", "WARN")
+        self.log("浏览器窗口已关闭，正在重新打开（登录态保留）…", "WARN")
         try:
-            self.restart(headless=target_headless)
+            self.restart()
             self.log("浏览器已重新打开，继续运行。")
             return True
         except Exception as e:
@@ -367,24 +388,6 @@ class ScholarBrowser:
             raise PageError(
                 "浏览器窗口已被关闭，而且没能重新打开。请重新点一次「登录」。")
 
-    def _restore_preferred_mode(self, switched: bool, step) -> None:
-        """登录做完后把浏览器收回用户偏好的模式。
-
-        这一步解决的是「难道我要一直开着两个窗口吗」：只在需要真人验证时
-        才把窗口露出来，验证完就收回后台，桌面上只留程序自己的界面。
-        """
-        if not switched or not self.prefer_headless:
-            return
-        try:
-            self.restart(headless=True)
-            if self.is_logged_in():
-                step("登录已完成，浏览器已收回后台运行 —— 桌面上不用一直开着它"
-                     "（会话已保留）。")
-                return
-            self.log("收回后台后会话没保住，改为保留可见窗口。", "WARN")
-            self.restart(headless=False)
-        except Exception as e:
-            self.log(f"切换浏览器模式失败（不影响后续运行）：{e}", "WARN")
 
     def __enter__(self):
         self.start()
@@ -434,8 +437,7 @@ class ScholarBrowser:
         # 窗口可能在等待期间被关掉，先确认它还活着（不在就自动重开）
         self._ensure_alive("login")
 
-        # 登录要重新来一遍的内部计数：只在"本来无头、但必须真人操作"时才会用上
-        switched_to_visible = False
+        # 登录最多重走几轮，防止服务端反复要求验证时死循环
         restarts = 0
         guard = 0
         self._did_2fa = False
@@ -452,20 +454,18 @@ class ScholarBrowser:
             self._loaded = None
 
             if SSO_HOST not in (self.page.url or ""):
-                step("已有有效会话，无需登录。")
-                self._restore_preferred_mode(switched_to_visible, step)
-                return True
+                # 这里原来直接 return True。但"URL 不在认证域"并不等于
+                # "会话可用" —— 学校在会话处于中间态时也会把我们送到
+                # m=main，看着像已经登录了。
+                if self._verify_session():
+                    step("已有有效会话，无需登录。")
+                    return True
+                self.log("落地页不在认证域，但数据页拿不到内容 —— "
+                         "会话说不上有效，继续走登录流程。", "WARN")
 
             # ---- 认证方式 ----
-            # 默认**不打开浏览器窗口**：验证码和二次验证都由主窗口问你要，
-            # 程序替你在后台页面上填好、提交。全程只有一个窗口。
-            # 只有在你明确选择「改用浏览器窗口完成」时才会开窗口。
-            need_window = visible_for_login or ask_human_code is None
-            if self.headless and need_window and restarts < 2:
-                if self.ensure_visible(on_progress):
-                    switched_to_visible = True
-                    restarts += 1
-                    continue
+            # 浏览器窗口一直开着（只用有头）：图形验证码和二次验证都在
+            # 主窗口里问你要，你输入后程序替你在页面上填好、提交。
 
             step("已到达统一身份认证页，准备填写账号…")
             a.scroll_page(self.page)
@@ -482,13 +482,10 @@ class ScholarBrowser:
                     if answer is None:
                         raise LoginCancelled("已取消登录。")
                     if answer == HUMAN_VISIBLE:
-                        if self.ensure_visible(on_progress):
-                            switched_to_visible = True
-                            continue
+                        self.ensure_visible(on_progress)
                         done = self._wait_human_login(
                             "请在浏览器窗口里填写图形验证码并点「登录」，程序会自动继续。",
                             human_timeout, step)
-                        self._restore_preferred_mode(switched_to_visible, step)
                         return done
                     a.type_text(self.page, box, answer)
                 else:
@@ -506,11 +503,20 @@ class ScholarBrowser:
                 self.log("当前页面没有登录表单，先确认会话是否已经好了。", "WARN")
                 if self.is_logged_in():
                     step("✅ 已经登录成功。")
-                    self._restore_preferred_mode(switched_to_visible, step)
                     return True
+                hint = ""
+                if getattr(self, "_bad_session", 0):
+                    # 刚才已经出现过"登录提交成功但会话无效"，八成是这台
+                    # 设备还没过二次认证 —— 那就别再报"页面不对"这种没用的
+                    # 话了，直接告诉用户该干什么。
+                    hint = ("\n\n前面已经出现过「登录提交成功、但会话拿不到」的"
+                            "情况，这通常是这台设备还没通过学校的二次认证。\n"
+                            "请在已打开的浏览器窗口里手动完成一次登录"
+                            "（含二次认证那一步）。完成后这台设备会被记住，"
+                            "以后就不用再验证了。")
                 raise PageError(
                     f"登录页看起来不对（找不到账号输入框），页面停在："
-                    f"{(self.page.url or '')[:90]}")
+                    f"{(self.page.url or '')[:90]}{hint}")
             # 真实页面会把已经填好的账号设成 readonly（
             #   if ($("#i_user").val() != "") { $("#i_user").attr("readonly","readonly"); }
             # ）。这时别去填 —— 对只读元素 fill/type 会直接抛「元素不可编辑」。
@@ -549,9 +555,25 @@ class ScholarBrowser:
             status = self._wait_landing(timeout, on_progress=on_progress)
 
             if status == "ok":
-                step(f"登录成功！落地页：{(self.page.url or '')[:70]}")
-                self._restore_preferred_mode(switched_to_visible, step)
-                return True
+                if self._verify_session():
+                    step(f"登录成功！落地页：{(self.page.url or '')[:70]}")
+                    return True
+                # 落地了、但会话是死的。全新设备最常这样：学校接受了登录
+                # 却不给会话，因为这台设备还没通过二次认证。
+                self.log("落地页看着像登录成功，但数据页返回「登陆超时」——"
+                         "会话其实没建立起来。多半是这台设备还没通过二次认证。",
+                         "WARN")
+                self._bad_session = getattr(self, "_bad_session", 0) + 1
+                if self._bad_session >= 2:
+                    raise PageError(
+                        "登录提交后始终拿不到有效会话（数据页返回「登陆超时」）。\n\n"
+                        "最常见的原因是这台设备还没通过学校的二次认证。\n"
+                        "请在已经打开的浏览器窗口里手动完成一次登录"
+                        "（含二次认证那一步），之后再运行程序。\n"
+                        "完成后这台设备会被记住，后续就不用再验证了。")
+                step("落地页拿到了但会话无效，再试一次…")
+                time.sleep(4)
+                continue
 
             if status == "need_human":
                 # ---- 首选：在程序主窗口里完成，不开浏览器窗口 ----
@@ -559,7 +581,6 @@ class ScholarBrowser:
                     solved = self._solve_second_factor_here(step, ask_human_code,
                                                             human_timeout)
                     if solved:
-                        self._restore_preferred_mode(switched_to_visible, step)
                         return True
 
                 # 已经完整走过一次二次验证（选了「记为信任」或「否」）却还停在
@@ -575,7 +596,6 @@ class ScholarBrowser:
                     # 跳过去就直接进系统了，不用重走登录。
                     if self._wait_landing(12, on_progress=None) == "ok":
                         step("✅ 二次验证通过，已进入选课系统。")
-                        self._restore_preferred_mode(switched_to_visible, step)
                         return True
                     if getattr(self, "_trust_choice", "") == "否":
                         # 没登记信任设备 → 下次登录还会要验证码，这是正常的，
@@ -597,15 +617,11 @@ class ScholarBrowser:
                     if answer != HUMAN_VISIBLE:
                         # 用户没明确要开窗口（取消、或超时）—— 那就别开
                         raise LoginCancelled("已取消登录。")
-                if self.headless and restarts < 2 and self.ensure_visible(on_progress):
-                    switched_to_visible = True
-                    restarts += 1
-                    continue
+                self.ensure_visible(on_progress)
                 done = self._wait_human_login(
                     "本次登录要求二次认证（短信 / 微信验证码）。请在已经打开的"
                     "浏览器窗口里输入收到的验证码，程序会自动继续。",
                     human_timeout, step)
-                self._restore_preferred_mode(switched_to_visible, step)
                 return done
 
             # ---- 失败：尽量说清楚是哪一种 ----
@@ -1542,6 +1558,22 @@ class ScholarBrowser:
         except Exception:
             return False
 
+    def _verify_session(self) -> bool:
+        """登录后确认会话**真的**可用，而不是"落地页看着对"。
+
+        为什么必须验：实测全新浏览器配置（这台设备还没登记过信任）下，
+        学校那边会接受登录、把我们送到 m=main，但**不给有效会话** ——
+        之后所有数据页拿到的都是 355 字节的「登陆超时」小页面。
+
+        以前只看"落地页在教务域名下"就宣布登录成功，于是程序带着一个
+        死会话进入监听，每次轮询都撞会话失效、反复重登。现在多花一次
+        数据页读取，把这个谎话堵掉。
+        """
+        try:
+            return bool(self.is_logged_in())
+        except Exception:
+            return False
+
     def ensure_login(self, user: str, password: str, **kw) -> bool:
         if self.is_logged_in():
             return True
@@ -1557,6 +1589,110 @@ class ScholarBrowser:
         q.update({k: v for k, v in params.items() if v not in (None, "")})
         return BASE + "xkBks.vxkBksXkbBs.do?" + urlencode(q)
 
+    _FIND_SITE_LINK = r"""
+    (want) => {
+      // 只读：找出指向 want 的**可见**链接，返回它在 a[href] 列表里的下标。
+      // 不修改任何 DOM —— 只做查询。
+      const norm = (h) => {
+        try {
+          const u = new URL(h, location.href);
+          const ps = Array.from(u.searchParams.entries()).sort();
+          return u.origin + u.pathname + '?' +
+                 ps.map(([k, v]) => k + '=' + v).join('&');
+        } catch (e) { return ''; }
+      };
+      const target = norm(want);
+      const now = norm(location.href);
+      if (!target || target === now) return -1;
+      const all = Array.from(document.querySelectorAll('a[href]'));
+      for (let i = 0; i < all.length; i++) {
+        const a = all[i];
+        // 隐藏的链接（折叠菜单）点了也没用，跳过
+        if (!(a.offsetParent !== null || a.getClientRects().length)) continue;
+        if (norm(a.href) === target) return i;
+      }
+      return -1;
+    }
+    """
+
+    def _click_site_link(self, url: str) -> bool:
+        """当前页面里若有指向 url 的**可见站内链接**，就用真实点击走它。
+
+        为什么绕这一下：直接 goto 时浏览器发出的文档请求是
+        `Sec-Fetch-Site: none` 且**没有 Referer**；而真人从菜单点进去是
+        `Sec-Fetch-Site: same-origin` + 上一页作 Referer。
+        这个头就是给服务端判断「本次导航是不是站内内容发起的」，查起来零成本。
+
+        点真实链接时这些头由浏览器自己算出来，**不需要伪造任何东西**。
+        （反过来，手动塞一个 Referer 去 goto 会造出「有 Referer 但
+        Sec-Fetch-Site 是 none」这种自相矛盾的组合，比直开更可疑，所以不做。）
+
+        只在找到**完全一致**的链接时才走这条路 —— 避免点了别的菜单项、
+        拿回一份不相干的课程列表。
+        """
+        try:
+            idx = self.page.evaluate(self._FIND_SITE_LINK, url)
+            if not isinstance(idx, int) or idx < 0:
+                return False
+            link = self.page.locator("a[href]").nth(idx)
+            self._tr(f"navigate 经站内链接 #{idx}")
+            self.actor.click(self.page, link)
+            try:
+                self.page.wait_for_load_state("domcontentloaded", timeout=20000)
+            except Exception:
+                pass
+            # **点完必须确认真的过去了**。只凭"点了"不够：链接可能被
+            # 拦掉、可能是被 JS 接管后什么都不做。真没过去却返回 True，
+            # 上层就会把 _loaded 标成目标页，后面读到的是上一页的数据 ——
+            # 这种错比慢一点危险得多。
+            # 用页面自己的 location.href 判断（最可靠），并且只比对 m 参数：
+            # 服务端可能补/去别的参数，但我们关心的是"是不是同一个页面"。
+            want_m = self._query_param(url, "m")
+            want_norm = self._norm_url(url)
+            end = time.time() + 12
+            while time.time() < end:
+                try:
+                    cur = self.page.evaluate("() => location.href") or ""
+                except Exception:
+                    cur = ""
+                if cur:
+                    # 有 m 参数时按 m 判：服务端可能补/去别的参数，
+                    # 但我们只关心"是不是同一个页面"。
+                    if want_m:
+                        if self._query_param(cur, "m") == want_m:
+                            return True
+                    elif self._norm_url(cur) == want_norm:
+                        return True
+                time.sleep(0.2)
+            self._tr("navigate 点了站内链接但页面没过去，改用直接导航")
+            return False
+        except Exception as e:
+            self._tr(f"navigate 走站内链接失败：{e}")
+            return False
+
+    @staticmethod
+    def _query_param(url: str, name: str) -> str:
+        """从一个 URL 里取一个查询参数。取不到返回空串。"""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            return (parse_qs(urlparse(url).query).get(name) or [""])[0]
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _norm_url(url: str) -> str:
+        """规范化 URL：去掉 fragment、查询参数排序。
+
+        与页面上那段查找链接的 JS 里的 norm() 保持一致，两边才算得一样。
+        """
+        try:
+            from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+            u = urlparse(url)
+            q = urlencode(sorted(parse_qsl(u.query)))
+            return urlunparse((u.scheme, u.netloc, u.path, "", q, ""))
+        except Exception:
+            return url
+
     def _navigate(self, m: str, *, force_check: bool = False, pause_range=(0.25, 0.7),
                   **params):
         """在浏览器里打开一个子系统页面（真实导航 + 真人的短暂停顿）。"""
@@ -1566,17 +1702,19 @@ class ScholarBrowser:
             return self.page
         url = self._url(m, **params)
         self._tr(f"navigate {url}")
-        try:
-            self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        except Exception as e:
-            # 窗口正好在这一瞬间被用户关掉：上面的 _ensure_alive 检查过了也没用，
-            # 因为关闭发生在那之后。重开一次再来。
-            if not self._looks_closed(e):
-                raise
-            self.log("导航过程中浏览器窗口被关闭，重新打开后重试本次导航…", "WARN")
-            if not self.revive():
-                raise
-            self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        # 先试站内链接；找不到一致的链接才直接开 URL。
+        if not self._click_site_link(url):
+            try:
+                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:
+                # 窗口正好在这一瞬间被用户关掉：上面的 _ensure_alive 检查过了也没用，
+                # 因为关闭发生在那之后。重开一次再来。
+                if not self._looks_closed(e):
+                    raise
+                self.log("导航过程中浏览器窗口被关闭，重新打开后重试本次导航…", "WARN")
+                if not self.revive():
+                    raise
+                self.page.goto(url, wait_until="domcontentloaded", timeout=45000)
         self._loaded = key
         if pause_range:
             self.actor.ui_pause(*pause_range)
@@ -1591,6 +1729,145 @@ class ScholarBrowser:
             raise SessionExpired("会话已失效（页面提示登陆超时）")
         self._tr(f"navigate 完成 {m}  {html_len} 字节")
         return self.page
+
+    # ------------------------------------------------------------------
+    # 伪装：闲逛 / 改窗口大小 / 切标签页
+    # ------------------------------------------------------------------
+    #
+    # 为什么需要这些：服务端日志里，这个程序原本只呈现一种形态 ——
+    # 同一个 m=yxSearchTab 端点被精确重复几百次，中间不访问任何其他页面。
+    # 真人在教务系统里是会点来点去的。下面三个动作就是用来打散这个形态的。
+    #
+    # 它们**花的是两次轮询之间本来就要等掉的时间**，不是额外延时，
+    # 所以对抢课时机没有影响（由调度器负责塞进空闲窗口）。
+
+    # 闲逛目标：真人在等放课时会看的页面。
+    # main 权重高（最常回去看），showTree 是左侧菜单（frameset 的框架页），
+    # cxSearchTab 是选课页本身。
+    BROWSE_TARGETS = ("main", "main", "cxSearchTab", "main", "showTree")
+
+    def browse_somewhere(self, m: str | None = None) -> bool:
+        """像真人一样到别的页面看一眼。失败一律吞掉（只是伪装，不影响监听）。"""
+        self._ensure_alive("browse")
+        m = m or random.choice(self.BROWSE_TARGETS)
+        try:
+            self._navigate(m, pause_range=(0.35, 1.05))
+        except Exception as e:
+            self._loaded = None
+            self._tr(f"闲逛 {m} 没成功（忽略）：{type(e).__name__}: {e}")
+            return False
+        # 已经把会话带到别的页面了，必须让下一轮轮询重新导航，
+        # 否则 _navigate 会以为"还在选课页"而直接返回。
+        self._loaded = None
+        self.actor.browse_around(self.page, seconds=random.uniform(2.5, 6.0))
+        self._tr(f"闲逛了一下：{m}")
+        return True
+
+    def nudge_window(self) -> bool:
+        """改变**真实窗口**的大小（等价于用户拖窗口边缘）。
+
+        用 CDP 的 Browser.setWindowBounds 改的是操作系统窗口，不是页面视口 ——
+        因为浏览器是 no_viewport 启动的，视口会跟着窗口一起变，
+        所以 outerWidth/innerWidth/screenX/screenY 全都保持自洽。
+
+        真人用久了窗口大小是会变的；一个开了六个小时、尺寸一动不动、
+        坐标永远在 (10,10) 的窗口，本身也是个信号。
+        """
+        self._ensure_alive("window")
+        try:
+            cdp = self.page.context.new_cdp_session(self.page)
+        except Exception as e:
+            self._tr(f"拿不到 CDP 会话，跳过改窗口：{e}")
+            return False
+        try:
+            info = cdp.send("Browser.getWindowForTarget")
+        except Exception as e:
+            self._tr(f"getWindowForTarget 失败，跳过改窗口：{e}")
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+            return False
+        try:
+            wid = info.get("windowId")
+            if wid is None:
+                return False
+            sw, sh, _ = logical_screen()
+            if sw < 800:
+                sw, sh = 1707, 960
+            # 挑一个还装得下的尺寸；窗口外框比 inner 大，所以留足余量
+            w = min(random.choice((1280, 1330, 1400, 1460, 1520)), max(900, sw - 80))
+            h = min(random.choice((740, 800, 855, 895)), max(560, sh - 140))
+            cdp.send("Browser.setWindowBounds", {
+                "windowId": wid,
+                "bounds": {"width": int(w), "height": int(h), "windowState": "normal"},
+            })
+            # 窗口变了，HumanActor 里缓存的视口尺寸就废了 —— 必须清掉，
+            # 否则后面鼠标坐标会算到窗口外面去。
+            try:
+                self.actor._vw = 0
+                self.actor._vh = 0
+            except Exception:
+                pass
+            self._tr(f"把窗口调成了 {w}x{h}")
+            return True
+        except Exception as e:
+            self._tr(f"setWindowBounds 失败，跳过：{e}")
+            return False
+        finally:
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+
+    def flash_tab(self, *, m: str = "main") -> bool:
+        """多开一个标签页看一眼，来回切几次，再关掉。
+
+        标签页是**真标签页**（同一个浏览器窗口里的新标签），不是新窗口 ——
+        真人在等放课时会开一个标签去查别的课，再切回来。
+        """
+        self._ensure_alive("tab")
+        main_page = self.page
+        try:
+            extra = self.page.context.new_page()
+        except Exception as e:
+            self._tr(f"开新标签页失败，跳过：{e}")
+            return False
+        try:
+            try:
+                extra.goto(self._url(m), wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                self._tr(f"新标签页导航失败（忽略）：{e}")
+                return False
+            self.actor.browse_around(extra, seconds=random.uniform(1.5, 3.5))
+            # 来回切几次焦点
+            for _ in range(random.randint(1, 3)):
+                try:
+                    extra.bring_to_front()
+                except Exception:
+                    pass
+                self.actor.ui_pause(0.5, 1.4)
+                try:
+                    main_page.bring_to_front()
+                except Exception:
+                    pass
+                self.actor.ui_pause(0.4, 1.1)
+            self._tr("开了一个标签页又切了回来")
+            return True
+        except Exception as e:
+            self._tr(f"切标签页出错（忽略）：{e}")
+            return False
+        finally:
+            try:
+                extra.close()
+            except Exception:
+                pass
+            try:
+                main_page.bring_to_front()
+            except Exception:
+                pass
+            # 主页面可能因为切来切去被重新加载/换了地址，让下轮轮询重新导航
+            self._loaded = None
 
     # ------------------------------------------------------------------
     # 读：学期列表

@@ -73,7 +73,7 @@ class FakePage:
 
 
 def mk(url, html="", table=None):
-    b = ScholarBrowser(Path("."), headless=True, log=lambda m, l="INFO": None)
+    b = ScholarBrowser(Path("."), log=lambda m, l="INFO": None)
     b.page = FakePage(url, html, table)
     return b
 
@@ -106,7 +106,7 @@ class RadioList:
 
 
 def method_browser():
-    b = ScholarBrowser(Path("."), headless=True, log=lambda m, l="INFO": None)
+    b = ScholarBrowser(Path("."), log=lambda m, l="INFO": None)
 
     class Rad:
         def __init__(self, v):
@@ -166,7 +166,7 @@ TRUST_HTML = ("二次验证成功 是否将本次登录使用的设备及浏览�
 
 
 def trust_browser(values=("是", "否")):
-    b = ScholarBrowser(Path("."), headless=True, log=lambda m, l="INFO": None)
+    b = ScholarBrowser(Path("."), log=lambda m, l="INFO": None)
 
     class Rad:
         def __init__(self, v):

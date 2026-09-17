@@ -236,7 +236,7 @@ class Scheduler:
         # 如果界面已经接管了一个，就直接用它，省掉一次启动和登录。
         if self.browser is None:
             self.browser = ScholarBrowser(
-                self.paths.profile, xnxq=cfg.xnxq, headless=cfg.headless,
+                self.paths.profile, xnxq=cfg.xnxq,
                 viewport=tuple(cfg.viewport), log=self.say,
                 actor=HumanActor(NORMAL, self.say))
             self.browser.start()
@@ -303,15 +303,27 @@ class Scheduler:
         # ---- 阶段 A：慢慢等，偶尔看一眼选课阶段 ----
         watcher = PollRhythm(avg=max(30.0, cfg.poll_avg), jitter=(0.7, 1.5),
                              long_prob=0.15, long_factor=(1.4, 2.6))
+        self._browse_in = random.randint(int(cfg.browse_every[0]),
+                                         int(cfg.browse_every[1]))
         while not self._stop.is_set() and datetime.now() < arrive:
+            # 等待期同样要守夜间静默：这里原来漏了，半夜开着程序等第二天
+            # 的选课，整晚都在定时敲学校服务器。
+            if not self._night_ok():
+                continue
             left = (arrive - datetime.now()).total_seconds()
             self.status.state = State.WAITING.value
             self.status.message = f"等待开始（还剩 {self._human_left(left)}）"
             self._push()
-            if not self._sleep(min(watcher.next(), max(5.0, left))):
+            gap = min(watcher.next(), max(5.0, left))
+            if not self._sleep(gap):
                 return self._finish_stopped()
             if random.random() < 0.35:
                 self._peek_phase()
+            # 等待期的伪装：真人等放课时会去别的页面看看
+            if self._browse_in <= 0:
+                self._browse_in = random.randint(int(cfg.browse_every[0]),
+                                                 int(cfg.browse_every[1]))
+                self._disguise_window(random.uniform(2.5, 7.0))
 
         self.say("进入提前盯梢窗口。", "WARN")
         self._watch_until_open(start_at)
@@ -361,6 +373,15 @@ class Scheduler:
             # next_poll_in（第一轮是初始值 0），「距下次检查」就一直是横杠。
             period = rhythm.next()
             remain = max(0.0, period - (time.time() - t_round))
+
+            # 伪装：每 6~12 次轮询，在空闲窗口里去别的页面看一眼。
+            # 之所以放在这里而不是额外 sleep，是因为 remain 本来就是要
+            # 等掉的时间 —— 用它来伪装，抢课节奏一点不受影响。
+            if self._browse_in <= 0:
+                self._browse_in = random.randint(int(cfg.browse_every[0]),
+                                                 int(cfg.browse_every[1]))
+                remain = self._disguise_window(remain)
+
             self.status.next_poll_in = remain
             self._push()
             if not self._sleep(remain):
@@ -395,6 +416,8 @@ class Scheduler:
         self.status.state = State.MONITORING.value
         last_report = 0.0
         t0 = time.time()
+        self._browse_in = random.randint(int(cfg.browse_every[0]),
+                                         int(cfg.browse_every[1]))
 
         while not self._stop.is_set():
             if not self._night_ok():
@@ -491,6 +514,13 @@ class Scheduler:
                 done_flags.append(False)
 
         self.status.courses = snapshot
+        # 轮询本身只做「开页面 + 读表格」，全程零鼠标事件；而真人打开的
+        # 页面会持续产生 mousemove / wheel。这里补一点无副作用的噪声，
+        # 让"页面在被人看着"这件事在事件流里也成立。
+        try:
+            self.browser.actor.idle_noise(self.browser.page)
+        except Exception:
+            pass
         return bool(done_flags) and all(done_flags)
 
     def _read_rows(self, entry: CourseEntry) -> list:
@@ -815,6 +845,39 @@ class Scheduler:
                 if not self._sleep(random.uniform(8, 16)):
                     return False
         return False
+
+    def _disguise_window(self, remain: float) -> float:
+        """在两次轮询之间的空闲时间里做点"像人"的事。
+
+        返回还剩余多久需要睡。
+
+        关键点：这些动作**花的是本来就要等掉的时间**，不是额外延时 ——
+        所以对抢课时机没有影响。窗口不够（<2 秒）就直接跳过这一轮，
+        宁可这次不伪装，也不去挤占轮询节奏。
+
+        夜间静默由调用点的 _night_ok() 挡住，这里不用重复判断。
+        """
+        if remain < 2.0:
+            return remain
+        t0 = time.time()
+        try:
+            r = random.random()
+            if r < 0.45:
+                self.browser.browse_somewhere()
+            elif r < 0.70:
+                self.browser.flash_tab()
+            elif r < 0.85:
+                self.browser.nudge_window()
+                self.browser.actor.browse_around(self.browser.page,
+                                                 seconds=random.uniform(1.5, 3.0))
+            else:
+                self.browser.actor.browse_around(self.browser.page,
+                                                 seconds=random.uniform(2.5, 6.0))
+        except Exception as e:
+            # 伪装失败绝不能影响监听
+            log.info("伪装动作失败（不影响监听）：%s: %s", type(e).__name__, e)
+        spent = time.time() - t0
+        return max(0.0, remain - spent)
 
     def _sleep(self, seconds: float) -> bool:
         """可被打断的睡眠。返回 False 表示被要求停止。"""

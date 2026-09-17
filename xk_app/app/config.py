@@ -149,8 +149,14 @@ class AppConfig:
 
     # ---- 学期与浏览器 ----
     xnxq: str = ""              # 留空 = 登录后自动识别教务系统的当前学期
-    headless: bool = False             # False = 有头（可见窗口），伪装度最高；True = 无头但特征多
     viewport: list = field(default_factory=lambda: [1366, 900])
+
+    # ---- 伪装行为（"闲逛"）----
+    # 每多少次轮询之后，在两次轮询之间的**空闲窗口**里做一次拟人动作
+    # （换个页面看看 / 开个标签页 / 调一下窗口大小）。
+    # 花的是本来就要等掉的时间，不额外增加延时；窗口太短就跳过。
+    # 想关掉就设成 [0, 0]。
+    browse_every: list = field(default_factory=lambda: [6, 12])
 
     # ---- 运行模式 ----
     mode: int = 1                      # 1=未开始选课  2=即将开始需退课  3=长期监听

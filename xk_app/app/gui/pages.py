@@ -677,17 +677,7 @@ class CoursesPage(QWidget):
         self.cb_night.setChecked(True)
         s.addWidget(self.cb_night)
 
-        # 这个开关以前根本不存在 —— 可二次认证的报错却让用户「到运行设置里改成
-        # 可见窗口」，用户照着做会发现没这个选项。补上，并且默认勾选。
-        self.cb_headed = QCheckBox("显示浏览器窗口（推荐）")
-        self.cb_headed.setChecked(True)
-        self.cb_headed.setToolTip(
-            "勾上：浏览器窗口可见，伪装度最高；遇到验证码或二次验证时你可以直接操作。\n"
-            "取消：浏览器在后台跑，桌面更清爽。需要你验证时它仍会自动弹出来。\n\n"
-            "两种模式下，窗口都可以随时关掉——程序会自动转到后台继续，不会中断。")
-        s.addWidget(self.cb_headed)
-        lb_headed = QLabel("窗口可以随时关掉，程序会自动在后台重开，不会中断；"
-                           "只有需要你输验证码时才会弹出来。不想让它平时占着桌面就取消勾选。")
+        lb_headed = QLabel("浏览器窗口会一直开着：遇到图形验证码或二次验证时，你直接在那个窗口里操作即可，程序会自动接着往下走。")
         lb_headed.setObjectName("Faint")
         lb_headed.setWordWrap(True)
         s.addWidget(lb_headed)
@@ -780,14 +770,7 @@ class CoursesPage(QWidget):
 
         root.addWidget(right_host, 6)
 
-    def headless(self) -> bool:
-        """「后台无窗口」= 没勾「显示浏览器窗口」。"""
-        return not self.cb_headed.isChecked()
 
-    def set_headless(self, headless: bool):
-        self.cb_headed.blockSignals(True)
-        self.cb_headed.setChecked(not headless)
-        self.cb_headed.blockSignals(False)
 
     # ------------------------------------------------------------------
     def _on_action_changed(self, i):

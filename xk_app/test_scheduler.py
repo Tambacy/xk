@@ -102,7 +102,6 @@ cfg.user = sec["user"]
 cfg.mode = 3
 cfg.poll_avg = 3.0
 cfg.dry_run = True
-cfg.headless = True
 cfg.night_silence = []          # 测试时关掉，现在是白天本来也不受影响
 cfg.set_courses([CourseEntry(action="grab", kind="ty", kch="10721071", kxh="2",
                              name="三年级男生乒乓球", time_text="4-1")])

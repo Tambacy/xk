@@ -99,7 +99,6 @@ class MainWindow(QMainWindow):
 
         self._wire()
         self.page_login.set_config(self.cfg)
-        self.page_courses.set_headless(self.cfg.headless)
         if self.cfg.user:
             self._set_user_label(self.cfg.user)
 
@@ -158,7 +157,6 @@ class MainWindow(QMainWindow):
         self.page_courses.validate.connect(self.on_validate)
         self.page_courses.reload_selected.connect(self.on_reload_selected)
         self.page_courses.drop_requested.connect(self.on_drop_requested)
-        self.page_courses.cb_headed.toggled.connect(self.on_headless_toggled)
         self.page_courses.back.connect(lambda: self.goto(1))
         self.page_courses.next.connect(lambda: self.goto(3))
         self.page_confirm.back.connect(lambda: self.goto(2))
@@ -204,7 +202,6 @@ class MainWindow(QMainWindow):
                               reverse=reverse)
         if index == 2:
             self.page_courses.apply_mode(self.cfg.mode)
-            self.page_courses.set_headless(self.cfg.headless)
             self.page_courses.set_entries(self.entries, self.results)
         if index == 3:
             # 进确认页之前先把界面上的设置读回配置。
@@ -280,13 +277,6 @@ class MainWindow(QMainWindow):
                  getattr(prompt, "allow_resend", False),
                  getattr(prompt, "allow_visible", False))
 
-    def on_headless_toggled(self, headed: bool):
-        headless = not headed
-        self.cfg.headless = headless
-        self.save_config()
-        if self.core:
-            self.core.do_set_headless(headless)
-        log.info("浏览器模式切换为：%s", "后台无窗口" if headless else "可见窗口")
 
     def _tick_login(self):
         t0 = getattr(self, "_login_t0", None)
@@ -520,7 +510,6 @@ class MainWindow(QMainWindow):
         cfg.poll_avg = pc.sp_avg.value()
         cfg.lead_seconds = pc.sp_lead.value()
         cfg.dry_run = pc.cb_dry.isChecked()
-        cfg.headless = pc.headless()
         cfg.xnxq = pc.current_xnxq() or cfg.xnxq
         cfg.night_silence = (["01:00", "06:00"] if pc.cb_night.isChecked() else [])
         if cfg.mode in (1, 2):
@@ -570,7 +559,7 @@ class MainWindow(QMainWindow):
         self.goto(4)
         log.info("启动任务：模式=%s 课程=%d 门 间隔=%ss 试运行=%s 浏览器=%s",
                  cfg.mode, len(self.entries), cfg.poll_avg, cfg.dry_run,
-                 "后台无窗口" if cfg.headless else "可见窗口")
+                 "可见窗口")
         if self.core:
             self.core.do_start()
 
