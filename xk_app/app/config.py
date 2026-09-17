@@ -36,7 +36,7 @@ APP_DIR_NAME = "XkHelper"
 # 它记录的是一个历史事实，不是产品文案。
 OLD_APP_DIR_NAME = "THUXkHelper"
 APP_DISPLAY_NAME = "选课助手"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 
 def migrate_legacy_root(base: Path) -> None:

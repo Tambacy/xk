@@ -23,13 +23,13 @@ for _s in ("stdout", "stderr"):
         pass
 
 REPO = "Tambacy/xk"
-TAG = "v0.4.0"
-NAME = "v0.4.0 更名与数据迁移"
+TAG = "v0.5.0"
+NAME = "v0.5.0 浏览器行为与登录判断改进"
 ROOT = Path(__file__).resolve().parent.parent      # 从脚本位置推导，别写死本机路径
 NOTES = ROOT / "release" / "RELEASE_NOTES.md"
 ASSETS = [
-    ROOT / "release" / "XkHelper-v0.4.0-source.zip",
-    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.4.0.exe",
+    ROOT / "release" / "XkHelper-v0.5.0-source.zip",
+    ROOT / "xk_app" / "installer" / "XkHelper-Setup-0.5.0.exe",
 ]
 
 
